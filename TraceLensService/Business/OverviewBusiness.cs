@@ -41,9 +41,10 @@ namespace TraceLensService.Business
                 List<ServiceCardResponse> cards = statsTask.Result.Select(s =>
                 {
                     int slowOps = issues.Count(i => i.Service == s.Service && i.App == s.App && i.IsSlow);
-                    (AppKind App, OperationSummaryResponse Row) slowest = operations.Rows
+                    List<(AppKind App, OperationSummaryResponse Row)> appOps = operations.Rows
                         .Where(o => o.App == s.App && o.Row.Service == s.Service)
-                        .MaxBy(o => o.Row.AvgMs);
+                        .ToList();
+                    (AppKind App, OperationSummaryResponse Row) slowest = appOps.MaxBy(o => o.Row.AvgMs);
                     return new ServiceCardResponse
                     {
                         Service = s.Service,
@@ -58,7 +59,9 @@ namespace TraceLensService.Business
                         SlowestOperation = slowest.Row?.Operation,
                         SlowestOperationAvgMs = slowest.Row?.AvgMs,
                         SlowestOperationThresholdMs = slowest.Row?.ThresholdMs,
-                        ThresholdMs = defaultThreshold,
+                        // Kart grafiğindeki eşik çizgisi: uygulamanın operasyonları içindeki en düşük eşik
+                        // (görevlerin kendi eşikleri varsa varsayılan 200 ms yanlış alarm gibi görünmesin)
+                        ThresholdMs = appOps.Count > 0 ? appOps.Min(o => o.Row.ThresholdMs) : defaultThreshold,
                         Trend = trendsTask.Result.TryGetValue((s.Service, s.App), out List<double?>? trend)
                             ? trend : Enumerable.Repeat<double?>(null, OverviewTrendBuckets).ToList()
                     };
