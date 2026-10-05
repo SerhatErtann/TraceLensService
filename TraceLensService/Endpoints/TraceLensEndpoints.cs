@@ -7,6 +7,8 @@ using TraceLensService.Enums;
 using TraceLensService.Models.Requests;
 using TraceLensService.Models.Responses.Alerts;
 using TraceLensService.Models.Responses.Auth;
+using TraceLensService.Models.Responses.Issues;
+using TraceLensService.Models.Responses.Overview;
 using TraceLensService.Models.Responses.Settings;
 using TraceLensService.Models.Responses.Shared;
 using TraceLensService.Models.Responses.Thresholds;
@@ -62,6 +64,28 @@ namespace TraceLensService.Endpoints
             .WithDescription("Giriş açık mı ve oturum var mı")
             .Produces<DataResponse<AuthStatusResponse>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Auth);
+
+            #endregion
+
+            #region Overview
+
+            api.MapGet(TraceLensRouteUrls.Overview, async ([FromServices] OverviewBusiness business, [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<OverviewResponse> response = await business.GetOverview(request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Genel Bakış: tüm servis ve scheduler'ların özeti, kart grafikleri, açık sorun sayısı")
+            .Produces<DataResponse<OverviewResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Overview);
+
+            api.MapGet(TraceLensRouteUrls.Issues, async ([FromServices] OverviewBusiness business, [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<List<IssueResponse>> response = await business.GetIssues(request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Sorunlar: eşiği aşan veya hata veren endpoint/job'lar, önce alarmı olanlar (service ile filtrelenebilir)")
+            .Produces<DataResponse<List<IssueResponse>>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Overview);
 
             #endregion
 

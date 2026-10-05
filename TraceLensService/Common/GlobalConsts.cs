@@ -51,6 +51,14 @@ namespace TraceLensService.Common
         public const int AlertHistoryLimit = 200;
         public const int DefaultAlertHistoryDays = 7;
 
+        // --- Genel Bakış / Sorunlar kuralları ---
+        /// <summary>Bu orandan fazla hatalı istek varsa operasyon/servis "hatalı" sayılır.</summary>
+        public const double IssueErrorRate = 0.05;
+        /// <summary>Tek bir yavaş istek sorun sayılmasın: en az bu kadar istek olmalı.</summary>
+        public const int IssueMinRequestCount = 3;
+        /// <summary>Servis kartı grafiğindeki nokta sayısı.</summary>
+        public const int OverviewTrendBuckets = 24;
+
         // --- Bildirim formatları (Notifications:Format) ---
         public const string TeamsFormat = "teams";
         public const string SlackFormat = "slack";
@@ -66,6 +74,8 @@ namespace TraceLensService.Common
             public const string TraceNotRetrieved = "Trace alınamadı.";
             public const string TraceNotFound = "Trace bulunamadı. Saklama süresi (7 gün) dolmuş olabilir.";
             public const string AlertsNotRetrieved = "Alarmlar alınamadı.";
+            public const string OverviewNotRetrieved = "Genel bakış alınamadı.";
+            public const string IssuesNotRetrieved = "Sorunlar alınamadı.";
             public const string NotificationNotConfigured = "Bildirim ayarlı değil (Notifications:WebhookUrl).";
             public const string NotificationSent = "Test bildirimi gönderildi.";
             public const string ThresholdsNotRetrieved = "Eşikler alınamadı.";
@@ -85,6 +95,7 @@ namespace TraceLensService.Common
 
             // Swagger etiketleri
             public const string Auth = "Auth";
+            public const string Overview = "Overview";
             public const string Thresholds = "Thresholds";
             public const string Services = "Services";
             public const string Schedulers = "Schedulers";

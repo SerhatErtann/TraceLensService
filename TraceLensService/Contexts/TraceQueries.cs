@@ -201,6 +201,120 @@ namespace TraceLensService.Contexts
                 ReadEvents(r.GetValue(10), r.GetValue(11), r.GetValue(12))), ct);
         }
 
+        #region Genel Bakış / Sorunlar (servis ve scheduler birlikte)
+
+        // Her iki sayfanın kök span'leri: servislerde gelen HTTP isteği, scheduler'larda job çalıştırması
+        private const string AnyRootCondition =
+            $"((SpanKind = '{ServerSpanKind}' AND ResourceAttributes['{AppTypeAttribute}'] = '{ServiceAppType}') OR SpanAttributes['{JobNameAttribute}'] != '')";
+        private const string AppKindExpr = $"if(SpanAttributes['{JobNameAttribute}'] != '', 'Scheduler', 'Service')";
+
+        /// <summary>Servis/scheduler başına istek sayısı, ortalama, p95 ve hata sayısı.</summary>
+        public Task<List<ServiceStats>> GetServiceStatsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = [];
+            string sql = $$"""
+                SELECT ServiceName, {{AppKindExpr}} AS app,
+                       count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6, countIf(StatusCode = '{{ErrorStatus}}')
+                FROM {{TracesTable}}
+                WHERE {{RangeCondition(from, to, p)}} AND {{AnyRootCondition}}
+                GROUP BY ServiceName, app
+                ORDER BY ServiceName
+                """;
+            return db.QueryAsync(sql, p, r => new ServiceStats(
+                r.GetString(0), Enum.Parse<AppKind>(r.GetString(1)),
+                Convert.ToInt64(r.GetValue(2)), Round(r.GetValue(3)), Round(r.GetValue(4)), Convert.ToInt64(r.GetValue(5))), ct);
+        }
+
+        /// <summary>Tüm servisler için tek satır: istek, ortalama, p95, hata.</summary>
+        public async Task<ServiceStats> GetOverallStatsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = [];
+            string sql = $$"""
+                SELECT count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6, countIf(StatusCode = '{{ErrorStatus}}')
+                FROM {{TracesTable}}
+                WHERE {{RangeCondition(from, to, p)}} AND {{AnyRootCondition}}
+                """;
+            return (await db.QueryAsync(sql, p, r =>
+            {
+                long count = Convert.ToInt64(r.GetValue(0));
+                return new ServiceStats(string.Empty, AppKind.Service, count,
+                    count == 0 ? 0 : Round(r.GetValue(1)), count == 0 ? 0 : Round(r.GetValue(2)), Convert.ToInt64(r.GetValue(3)));
+            }, ct))[0];
+        }
+
+        /// <summary>
+        /// Kart grafikleri: aralığı <paramref name="bucketCount"/> eşit parçaya bölüp servis başına ortalama süre.
+        /// Veri olmayan parça null kalır (grafikte boşluk).
+        /// </summary>
+        public async Task<Dictionary<(string Service, AppKind App), List<double?>>> GetServiceTrendsAsync(
+            DateTimeOffset from, DateTimeOffset to, int bucketCount, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new()
+            {
+                ["fromSec"] = from.ToUnixTimeSeconds(),
+                ["bucketSec"] = (long)Math.Max(1, Math.Ceiling((to - from).TotalSeconds / bucketCount))
+            };
+            string sql = $$"""
+                SELECT ServiceName, {{AppKindExpr}} AS app,
+                       intDiv(toUnixTimestamp(Timestamp) - {fromSec:Int64}, {bucketSec:Int64}) AS b,
+                       avg(Duration) / 1e6
+                FROM {{TracesTable}}
+                WHERE {{RangeCondition(from, to, p)}} AND {{AnyRootCondition}}
+                GROUP BY ServiceName, app, b
+                """;
+
+            Dictionary<(string, AppKind), List<double?>> result = [];
+            List<(string Service, AppKind App, long Bucket, double Avg)> rows = await db.QueryAsync(sql, p, r =>
+                (r.GetString(0), Enum.Parse<AppKind>(r.GetString(1)), Convert.ToInt64(r.GetValue(2)), Round(r.GetValue(3))), ct);
+            foreach (var row in rows)
+            {
+                if (!result.TryGetValue((row.Service, row.App), out List<double?>? series))
+                    result[(row.Service, row.App)] = series = Enumerable.Repeat<double?>(null, bucketCount).ToList();
+                if (row.Bucket >= 0 && row.Bucket < bucketCount)
+                    series[(int)row.Bucket] = row.Avg;
+            }
+            return result;
+        }
+
+        /// <summary>Hatalı istekleri olan operasyonlar için en sık hata (exception mesajı ya da HTTP kodu).</summary>
+        public async Task<Dictionary<(string Service, string Operation), string>> GetTopErrorsAsync(
+            DateTimeOffset from, DateTimeOffset to, string? service, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = [];
+            string serviceCondition = string.Empty;
+            if (!string.IsNullOrWhiteSpace(service))
+            {
+                p["service"] = service;
+                serviceCondition = " AND ServiceName = {service:String}";
+            }
+            string sql = $$"""
+                SELECT ServiceName, SpanName,
+                       topK(1)(if(StatusMessage != '', StatusMessage,
+                                  if(SpanAttributes['http.response.status_code'] != '', concat('HTTP ', SpanAttributes['http.response.status_code']), '')))
+                FROM {{TracesTable}}
+                WHERE {{RangeCondition(from, to, p)}} AND {{AnyRootCondition}} AND StatusCode = '{{ErrorStatus}}'{{serviceCondition}}
+                GROUP BY ServiceName, SpanName
+                """;
+
+            Dictionary<(string, string), string> result = [];
+            foreach ((string svc, string op, string? error) in await db.QueryAsync(sql, p, r =>
+                (r.GetString(0), r.GetString(1), (r.GetValue(2) as IList)?.Cast<object>().FirstOrDefault()?.ToString()), ct))
+            {
+                if (!string.IsNullOrEmpty(error))
+                    result[(svc, op)] = error;
+            }
+            return result;
+        }
+
+        private static string RangeCondition(DateTimeOffset from, DateTimeOffset to, Dictionary<string, object> p)
+        {
+            p["fromMs"] = from.ToUnixTimeMilliseconds();
+            p["toMs"] = to.ToUnixTimeMilliseconds();
+            return "Timestamp >= fromUnixTimestamp64Milli({fromMs:Int64}) AND Timestamp <= fromUnixTimestamp64Milli({toMs:Int64})";
+        }
+
+        #endregion
+
         private static string BuildWhere(TraceFilter f, Dictionary<string, object> p)
         {
             p["fromMs"] = f.From.ToUnixTimeMilliseconds();

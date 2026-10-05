@@ -105,6 +105,7 @@ builder.Services.AddScoped<TraceBusiness>();
 builder.Services.AddScoped<AlertBusiness>();
 builder.Services.AddScoped<ThresholdBusiness>();
 builder.Services.AddScoped<AuthBusiness>();
+builder.Services.AddScoped<OverviewBusiness>();
 
 var app = builder.Build();
 

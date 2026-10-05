@@ -21,6 +21,10 @@ namespace TraceLensService.Common
 
         public const string TraceDetail = "traces/{traceId}";
 
+        // Genel Bakış ve Sorunlar: servis + scheduler birlikte
+        public const string Overview = "overview";
+        public const string Issues = "issues";
+
         public const string Alerts = "alerts";
         public const string AlertTestNotification = "alerts/test-notification";
         public const string Settings = "settings";

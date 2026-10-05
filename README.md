@@ -138,6 +138,8 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 | Uç | Açıklama |
 |---|---|
 | `POST api/v1/auth/login` · `POST api/v1/auth/logout` · `GET api/v1/auth/me` | Giriş (bkz. "Dashboard girişi") |
+| `GET api/v1/overview` | Genel Bakış: tüm servis/scheduler özetleri, kart grafikleri (24 nokta), açık sorun ve alarm sayısı |
+| `GET api/v1/issues` | Sorunlar: ortalaması eşiği aşan veya hata oranı %5'i geçen endpoint/job'lar, en sık hata ve alarm bilgisiyle (`service` ile filtrelenebilir) |
 | `GET api/v1/{service\|scheduler}/services` | Filtre listesi |
 | `GET api/v1/{service\|scheduler}/summary` | Operasyon bazında sayı, ortalama, p95, eşiği aşan, hata |
 | `GET api/v1/{service\|scheduler}/totals` | KPI kartları |

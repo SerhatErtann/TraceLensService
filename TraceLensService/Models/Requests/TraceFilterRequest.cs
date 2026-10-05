@@ -20,9 +20,15 @@ namespace TraceLensService.Models.Requests
 
         public TraceFilter ToFilter(AppKind app)
         {
-            DateTimeOffset to = To ?? DateTimeOffset.UtcNow;
-            DateTimeOffset from = From ?? to - ParseRange(Range);
+            (DateTimeOffset from, DateTimeOffset to) = ResolveRange();
             return new TraceFilter(app, from, to, Service, Operation, MinDurationMs, OnlyErrors ?? false, OnlySlow ?? false);
+        }
+
+        /// <summary>Zaman aralığını çözer: from/to verilmişse onlar, yoksa şimdi - range.</summary>
+        public (DateTimeOffset From, DateTimeOffset To) ResolveRange()
+        {
+            DateTimeOffset to = To ?? DateTimeOffset.UtcNow;
+            return (From ?? to - ParseRange(Range), to);
         }
 
         private static TimeSpan ParseRange(string? range)
