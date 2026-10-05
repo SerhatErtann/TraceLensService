@@ -57,6 +57,10 @@ services:
       Notifications__Format: ${NOTIFICATIONS_FORMAT:-teams}
       Notifications__DashboardUrl: ${DASHBOARD_URL:-http://localhost:8080}
       Swagger__IsEnabled: "false"
+      # Dashboard girişi. Required=true: AUTH_PASSWORD boşsa servis açılmaz (korumasız yayını engeller)
+      Auth__Username: ${AUTH_USERNAME:-admin}
+      Auth__Password: ${AUTH_PASSWORD:-}
+      Auth__Required: "true"
     depends_on:
       clickhouse:
         condition: service_healthy

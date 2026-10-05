@@ -4,6 +4,11 @@ namespace TraceLensService.Common
     {
         public const string ApiVersion = "api/v1/";
 
+        // Giriş: bunlar dışındaki tüm uçlar oturum ister (şifre tanımlıysa)
+        public const string AuthLogin = "auth/login";
+        public const string AuthLogout = "auth/logout";
+        public const string AuthStatus = "auth/me";
+
         // Services ve Schedulers sayfaları aynı uçları kullanır; yalnızca grup öneki değişir.
         public const string ServiceGroup = "api/v1/service";
         public const string SchedulerGroup = "api/v1/scheduler";

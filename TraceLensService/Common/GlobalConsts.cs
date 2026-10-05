@@ -7,6 +7,12 @@ namespace TraceLensService.Common
         public const string SwaggerIsEnabled = "Swagger:IsEnabled";
         public const string HealthUrl = "/health";
 
+        // --- Giriş ---
+        public const string AuthCookieName = "tracelens.auth";
+        public const string LoginRateLimitPolicy = "login";
+        /// <summary>Aynı IP'den dakikada izin verilen giriş denemesi.</summary>
+        public const int LoginAttemptsPerMinute = 5;
+
         public const string ClickHouseConnection = "ClickHouse";
         public const string ClickHouseHttpClient = "clickhouse";
         public const string WebhookHttpClient = "webhook";
@@ -70,8 +76,15 @@ namespace TraceLensService.Common
             public const string ThresholdOverrideNotFound = "Bu operasyon için özel eşik tanımlı değil.";
             public const string ThresholdSaved = "Eşik kaydedildi.";
             public const string ThresholdDeleted = "Özel eşik kaldırıldı; varsayılan eşik geçerli.";
+            public const string InvalidCredentials = "Kullanıcı adı veya şifre hatalı.";
+            public const string LoginFailed = "Giriş yapılamadı.";
+            public const string AuthDisabled = "Giriş kapalı (Auth:Password tanımlı değil).";
+            public const string LoginRequired = "Oturum açmanız gerekiyor.";
+            public const string TooManyLoginAttempts = "Çok fazla deneme yapıldı. Bir dakika sonra tekrar deneyin.";
+            public const string AuthPasswordMissing = "Auth:Required=true ama Auth:Password tanımlı değil. Şifreyi ortam değişkeniyle verin (Auth__Password / .env AUTH_PASSWORD).";
 
             // Swagger etiketleri
+            public const string Auth = "Auth";
             public const string Thresholds = "Thresholds";
             public const string Services = "Services";
             public const string Schedulers = "Schedulers";

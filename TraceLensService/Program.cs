@@ -1,7 +1,12 @@
 using CommonUtils.Extensions;
 using CommonUtils.Interfaces;
+using CommonUtils.Models;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using System.Net;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using TraceLensService.Business;
 using TraceLensService.Common;
 using TraceLensService.Contexts;
@@ -30,6 +35,48 @@ builder.Services.AddCors(options =>
 builder.Services.Configure<ThresholdOptions>(builder.Configuration.GetSection(ThresholdOptions.SectionName));
 builder.Services.Configure<AlertOptions>(builder.Configuration.GetSection(AlertOptions.SectionName));
 builder.Services.Configure<NotificationOptions>(builder.Configuration.GetSection(NotificationOptions.SectionName));
+builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
+
+// ---- Giriş (kullanıcı adı + şifre, cookie oturumu) ----
+AuthOptions authOptions = builder.Configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new();
+if (authOptions.Required && !authOptions.Enabled)
+    throw new InvalidOperationException(GlobalConsts.GeneralConsts.AuthPasswordMissing);
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(o =>
+    {
+        o.Cookie.Name = GlobalConsts.AuthCookieName;
+        o.Cookie.HttpOnly = true;
+        // Strict: başka sitelerden gelen isteklere cookie eklenmez (CSRF koruması)
+        o.Cookie.SameSite = SameSiteMode.Strict;
+        o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        o.ExpireTimeSpan = TimeSpan.FromHours(authOptions.SessionHours);
+        o.SlidingExpiration = true;
+        // API: oturum yoksa login sayfasına yönlendirmek yerine 401 dön; dashboard giriş ekranını kendisi açar
+        o.Events.OnRedirectToLogin = ctx => WriteFailure(ctx.Response, StatusCodes.Status401Unauthorized, GlobalConsts.GeneralConsts.LoginRequired);
+        o.Events.OnRedirectToAccessDenied = ctx => WriteFailure(ctx.Response, StatusCodes.Status403Forbidden, GlobalConsts.GeneralConsts.LoginRequired);
+    });
+builder.Services.AddAuthorization(o =>
+{
+    // Şifre tanımlıysa AllowAnonymous olmayan her uç oturum ister
+    if (authOptions.Enabled)
+        o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
+});
+builder.Services.AddRateLimiter(o =>
+{
+    o.AddPolicy(GlobalConsts.LoginRateLimitPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = GlobalConsts.LoginAttemptsPerMinute, Window = TimeSpan.FromMinutes(1) }));
+    o.OnRejected = (ctx, _) => new ValueTask(WriteFailure(ctx.HttpContext.Response, StatusCodes.Status429TooManyRequests, GlobalConsts.GeneralConsts.TooManyLoginAttempts));
+});
+// nginx arkasında gerçek istemci IP'si (deneme sınırı IP bazlı). Servis yalnızca Docker ağından erişilebilir.
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.KnownIPNetworks.Clear();
+    o.KnownProxies.Clear();
+});
 
 // ---- ClickHouse ----
 builder.Services.AddHttpClient(GlobalConsts.ClickHouseHttpClient)
@@ -57,8 +104,14 @@ builder.Services.AddScoped<IEndpoint, TraceLensEndpoints>();
 builder.Services.AddScoped<TraceBusiness>();
 builder.Services.AddScoped<AlertBusiness>();
 builder.Services.AddScoped<ThresholdBusiness>();
+builder.Services.AddScoped<AuthBusiness>();
 
 var app = builder.Build();
+
+if (!authOptions.Enabled)
+    app.Logger.LogWarning("Dashboard girişi KAPALI (Auth:Password tanımlı değil). Sunucuda mutlaka şifre verin.");
+
+app.UseForwardedHeaders();
 
 if (builder.Configuration.GetValue<bool>(GlobalConsts.SwaggerIsEnabled))
 {
@@ -68,7 +121,19 @@ if (builder.Configuration.GetValue<bool>(GlobalConsts.SwaggerIsEnabled))
 
 app.UseCors(GlobalConsts.DefaultCorsPolicy);
 app.UseRouting();
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapEndpoints();
 // Container/yük dengeleyici sağlık kontrolü için
-app.MapGet(GlobalConsts.HealthUrl, () => Results.Ok("ok")).ExcludeFromDescription();
+app.MapGet(GlobalConsts.HealthUrl, () => Results.Ok("ok")).AllowAnonymous().ExcludeFromDescription();
 app.Run();
+
+// Yetkisiz/sınır aşımı yanıtları da diğer uçlar gibi BaseResponse gövdesiyle döner.
+static Task WriteFailure(HttpResponse response, int statusCode, string message)
+{
+    BaseResponse body = new();
+    body.Failure(message);
+    response.StatusCode = statusCode;
+    return response.WriteAsJsonAsync(body);
+}

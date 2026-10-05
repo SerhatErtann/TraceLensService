@@ -6,6 +6,7 @@ using TraceLensService.Common;
 using TraceLensService.Enums;
 using TraceLensService.Models.Requests;
 using TraceLensService.Models.Responses.Alerts;
+using TraceLensService.Models.Responses.Auth;
 using TraceLensService.Models.Responses.Settings;
 using TraceLensService.Models.Responses.Shared;
 using TraceLensService.Models.Responses.Thresholds;
@@ -27,6 +28,42 @@ namespace TraceLensService.Endpoints
             #endregion
 
             RouteGroupBuilder api = endpoints.MapGroup(TraceLensRouteUrls.ApiVersion);
+
+            #region Auth
+
+            // Diğer tüm uçlar Program.cs'teki varsayılan politika ile oturum ister; bu üçü herkese açık.
+            api.MapPost(TraceLensRouteUrls.AuthLogin, async ([FromServices] AuthBusiness business, [FromBody] LoginRequest request) =>
+            {
+                DataResponse<AuthStatusResponse> response = await business.Login(request);
+                return Results.Ok(response);
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting(LoginRateLimitPolicy)
+            .WithDescription("Kullanıcı adı + şifre ile oturum açar (cookie)")
+            .Produces<DataResponse<AuthStatusResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Auth);
+
+            api.MapPost(TraceLensRouteUrls.AuthLogout, async ([FromServices] AuthBusiness business) =>
+            {
+                BaseResponse response = await business.Logout();
+                return Results.Ok(response);
+            })
+            .AllowAnonymous()
+            .WithDescription("Oturumu kapatır")
+            .Produces<BaseResponse>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Auth);
+
+            api.MapGet(TraceLensRouteUrls.AuthStatus, async ([FromServices] AuthBusiness business) =>
+            {
+                DataResponse<AuthStatusResponse> response = await business.GetStatus();
+                return Results.Ok(response);
+            })
+            .AllowAnonymous()
+            .WithDescription("Giriş açık mı ve oturum var mı")
+            .Produces<DataResponse<AuthStatusResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Auth);
+
+            #endregion
 
             #region Trace
 

@@ -64,6 +64,7 @@ Sunucuda Docker ve Docker Compose yeterli; .NET veya Node kurmaya gerek yok.
    git clone https://github.com/SerhatErtann/TraceLensFrontend.git tracelens-frontend
    ```
 2. `tracelens-service` içinde `.env.example`'ı `.env` olarak kopyalayın ve doldurun. En az şunlar:
+   - `AUTH_PASSWORD`: dashboard giriş şifresi (**zorunlu**; boşsa API açılmaz). Kullanıcı adı `AUTH_USERNAME`, varsayılan `admin`
    - `CLICKHOUSE_PASSWORD`: güçlü bir şifre
    - `DASHBOARD_URL`: dashboard'un dışarıdan erişilen adresi (bildirimlerdeki link için)
    - `NOTIFICATIONS_WEBHOOK_URL`: Teams/Slack bildirimi isteniyorsa
@@ -87,6 +88,20 @@ Güncellemek için: `git pull` (iki repoda da) → `docker compose --profile app
 - `CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD` ClickHouse'un **ilk açılışında** kullanıcıyı oluşturur. Sonradan `.env`'de değiştirmek mevcut kullanıcının şifresini değiştirmez; önce ClickHouse'ta `ALTER USER` ile değiştirin.
 - Şifrede `;` karakteri kullanmayın (bağlantı cümlesinde ayraçtır).
 - **Alarm kontrolünü yalnızca bir TraceLensService örneği yapmalı.** Aynı veritabanına bağlı ikinci bir örnek (ör. sunucudaki container + yerelde Visual Studio'daki) çalışıyorsa, ikincisinde `Alerts__Enabled=false` verin; yoksa aynı alarm için iki bildirim gider.
+
+## Dashboard girişi
+
+Tek kullanıcılı, kullanıcı adı + şifre ile giriş. Kullanıcı adı ve şifre ortam değişkeninden okunur (`Auth__Username`, `Auth__Password`; Docker'da `.env` → `AUTH_USERNAME`, `AUTH_PASSWORD`).
+
+| Durum | Davranış |
+|---|---|
+| Şifre tanımlı | Dashboard giriş ekranı açar; `auth/login`, `auth/logout`, `auth/me` ve `/health` dışındaki tüm API uçları oturum ister (yoksa 401) |
+| Şifre tanımlı değil (yerel geliştirme) | Giriş kapalı, herkes erişir; açılışta uyarı loglanır |
+| `Auth__Required=true` ve şifre yok | API **açılmaz** (docker-compose'da açık; sunucuda yanlışlıkla korumasız yayını engeller) |
+
+- Oturum cookie'si `HttpOnly` ve `SameSite=Strict`; 8 saat kullanılmazsa düşer.
+- Aynı IP'den dakikada en fazla 5 giriş denemesi (başarılılar dahil); fazlası 429 döner.
+- Container yeniden başlayınca oturumlar düşer, yeniden giriş gerekir.
 
 ## ClickHouse'taki verilere bakmak
 
@@ -122,6 +137,7 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 
 | Uç | Açıklama |
 |---|---|
+| `POST api/v1/auth/login` · `POST api/v1/auth/logout` · `GET api/v1/auth/me` | Giriş (bkz. "Dashboard girişi") |
 | `GET api/v1/{service\|scheduler}/services` | Filtre listesi |
 | `GET api/v1/{service\|scheduler}/summary` | Operasyon bazında sayı, ortalama, p95, eşiği aşan, hata |
 | `GET api/v1/{service\|scheduler}/totals` | KPI kartları |
