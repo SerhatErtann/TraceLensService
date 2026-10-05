@@ -9,6 +9,7 @@ using TraceLensService.Models.Responses.Alerts;
 using TraceLensService.Models.Responses.Auth;
 using TraceLensService.Models.Responses.Issues;
 using TraceLensService.Models.Responses.Overview;
+using TraceLensService.Models.Responses.ServiceDetail;
 using TraceLensService.Models.Responses.Settings;
 using TraceLensService.Models.Responses.Shared;
 using TraceLensService.Models.Responses.Thresholds;
@@ -226,6 +227,25 @@ namespace TraceLensService.Endpoints
             })
             .WithDescription("Sayfalı istek listesi (sort: time | duration)")
             .Produces<DataResponse<PagedResponse<RequestRowResponse>>>(StatusCodes.Status200OK);
+
+            group.MapGet(TraceLensRouteUrls.ServiceBreakdown, async ([FromServices] TraceBusiness business,
+                string service, [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<ServiceBreakdownResponse> response = await business.GetBreakdown(service, request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Servis Detayı: süre dağılımı (kendi kodu / dış çağrı / DB) ve metod, DB sorgusu, dış çağrı grupları")
+            .Produces<DataResponse<ServiceBreakdownResponse>>(StatusCodes.Status200OK);
+
+            group.MapGet(TraceLensRouteUrls.ServiceSpanSamples, async ([FromServices] TraceBusiness business,
+                string service, [FromQuery] string? category, [FromQuery] string? name, [FromQuery] string? target,
+                [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<List<RequestRowResponse>> response = await business.GetSpanSamples(service, category, name, target, request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Bir metod / DB sorgusu / dış çağrının en yavaş örnekleri (category: method | db | call)")
+            .Produces<DataResponse<List<RequestRowResponse>>>(StatusCodes.Status200OK);
         }
     }
 }

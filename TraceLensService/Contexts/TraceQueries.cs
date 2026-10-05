@@ -361,14 +361,187 @@ namespace TraceLensService.Contexts
             return result;
         }
 
+        #endregion
+
+        #region Servis Detayı (bir servisin içi: metodlar, DB sorguları, dış çağrılar)
+
+        // Bir span'in türü. Kök = servise gelen istek veya job çalışması; "other" pastada "Diğer" olur.
+        private const string SpanCategoryExpr = $$"""
+            multiIf(mapContains(SpanAttributes, 'db.system') OR mapContains(SpanAttributes, 'db.system.name'), '{{SpanCategoryDb}}',
+                    SpanKind = 'Client' AND SpanAttributes['http.request.method'] != '', '{{SpanCategoryCall}}',
+                    SpanAttributes['{{JobNameAttribute}}'] != '' OR SpanKind = '{{ServerSpanKind}}', 'root',
+                    SpanKind = 'Internal', '{{SpanCategoryMethod}}', 'other')
+            """;
+
+        /// <summary>
+        /// Servisin metod / DB / dış çağrı span'leri, okunur adlarıyla (SpanNamer ile aynı kurallar):
+        /// DB span'i "SELECT Orders", dış çağrı çağrılan servisin route'u (karşı taraf enstrümante değilse
+        /// sayılar {id} yapılmış URL yolu). ClickHouse regex'i \b desteklemediği için kelime sınırı [^\w] ile yazılır.
+        /// </summary>
+        private static string ServiceSpansSource(string service, DateTimeOffset from, DateTimeOffset to, Dictionary<string, object> p)
+        {
+            p["service"] = service;
+            p["marginMs"] = (long)CalleeMatchMarginMs;
+            string range = RangeCondition(from, to, p);
+            return $$"""
+                (
+                    SELECT c.TraceId AS TraceId, c.SpanId AS SpanId, Timestamp, Duration, StatusCode, StatusMessage, http_code, cat,
+                           multiIf(cat = '{{SpanCategoryDb}}', if(verb = '', SpanName, if(tbl = '', verb, concat(verb, ' ', tbl))),
+                                   cat = '{{SpanCategoryCall}}', if(callee_op != '', callee_op, url_name),
+                                   SpanName) AS op_name,
+                           if(cat = '{{SpanCategoryCall}}', if(callee_service != '', callee_service, host), '') AS target
+                    FROM (
+                        SELECT TraceId, SpanId, Timestamp, Duration, StatusCode, StatusMessage, SpanName,
+                               SpanAttributes['http.response.status_code'] AS http_code,
+                               {{SpanCategoryExpr}} AS cat,
+                               if(SpanAttributes['db.query.text'] != '', SpanAttributes['db.query.text'], SpanAttributes['db.statement']) AS stmt,
+                               upper(extract(stmt, '(?i)(?:^|[^\\w])(SELECT|INSERT|UPDATE|DELETE|MERGE|EXEC)(?:[^\\w]|$)')) AS verb,
+                               extract(stmt, '(?i)(?:^|[^\\w])(?:FROM|INTO|UPDATE|JOIN)\\s+[\\["`]?(?:\\w+[\\]"`]?\\.)?[\\["`]?(\\w+)') AS tbl,
+                               if(SpanAttributes['url.full'] = '', SpanName,
+                                  concat(SpanAttributes['http.request.method'], ' ',
+                                         replaceRegexpAll(replaceRegexpAll(path(SpanAttributes['url.full']),
+                                             '/[0-9]+(/|$)', '/{id}\\1'), '/[0-9]+(/|$)', '/{id}\\1'))) AS url_name,
+                               if(SpanAttributes['server.port'] = '', SpanAttributes['server.address'],
+                                  concat(SpanAttributes['server.address'], ':', SpanAttributes['server.port'])) AS host
+                        FROM {{TracesTable}}
+                        WHERE {{range}} AND ServiceName = {service:String}
+                    ) AS c
+                    LEFT JOIN (
+                        SELECT TraceId, ParentSpanId, ServiceName AS callee_service, SpanName AS callee_op
+                        FROM {{TracesTable}}
+                        WHERE SpanKind = '{{ServerSpanKind}}'
+                          AND Timestamp >= fromUnixTimestamp64Milli({fromMs:Int64} - {marginMs:Int64})
+                          AND Timestamp <= fromUnixTimestamp64Milli({toMs:Int64} + {marginMs:Int64})
+                    ) AS s ON s.TraceId = c.TraceId AND s.ParentSpanId = c.SpanId
+                    WHERE cat IN ('{{SpanCategoryMethod}}', '{{SpanCategoryDb}}', '{{SpanCategoryCall}}')
+                )
+                """;
+        }
+
+        /// <summary>Metod / DB sorgusu / dış çağrı grupları, toplam süreye göre büyükten küçüğe.</summary>
+        public Task<List<SpanGroupRow>> GetSpanGroupsAsync(string service, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = [];
+            string sql = $$"""
+                SELECT cat, op_name, target, count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6, max(Duration) / 1e6,
+                       countIf(StatusCode = '{{ErrorStatus}}'), sum(Duration) / 1e6
+                FROM {{ServiceSpansSource(service, from, to, p)}}
+                GROUP BY cat, op_name, target
+                ORDER BY sum(Duration) DESC
+                LIMIT {{SpanGroupLimit}}
+                """;
+            return db.QueryAsync(sql, p, r => new SpanGroupRow(
+                r.GetString(0), r.GetString(1), r.GetString(2), Convert.ToInt64(r.GetValue(3)),
+                Round(r.GetValue(4)), Round(r.GetValue(5)), Round(r.GetValue(6)), Convert.ToInt64(r.GetValue(7)), Round(r.GetValue(8))), ct);
+        }
+
+        /// <summary>
+        /// Servisteki her span'in kendi süresi (çocukları hariç) türüne göre toplanır. Dış çağrı ve DB span'lerinin
+        /// tamamı kendi türüne yazılır (bekleme karşı tarafta). "root" satırı ayrıca istek sayısı ve toplam süreyi verir.
+        /// </summary>
+        public Task<List<(string Category, double SelfMs, double TotalMs, long Count)>> GetTimeSplitAsync(
+            string service, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new() { ["service"] = service };
+            string range = RangeCondition(from, to, p);
+            string sql = $$"""
+                SELECT cat, sum(self) / 1e6, sum(Duration) / 1e6, count()
+                FROM (
+                    SELECT t.cat AS cat, t.Duration AS Duration,
+                           if(t.cat IN ('{{SpanCategoryDb}}', '{{SpanCategoryCall}}'), toInt64(t.Duration),
+                              greatest(toInt64(t.Duration) - toInt64(k.d), 0)) AS self
+                    FROM (
+                        SELECT TraceId, SpanId, Duration, {{SpanCategoryExpr}} AS cat
+                        FROM {{TracesTable}}
+                        WHERE {{range}} AND ServiceName = {service:String}
+                    ) AS t
+                    LEFT JOIN (
+                        SELECT TraceId, ParentSpanId, sum(Duration) AS d
+                        FROM {{TracesTable}}
+                        WHERE {{range}} AND ServiceName = {service:String}
+                        GROUP BY TraceId, ParentSpanId
+                    ) AS k ON k.TraceId = t.TraceId AND k.ParentSpanId = t.SpanId
+                )
+                GROUP BY cat
+                """;
+            return db.QueryAsync(sql, p, r =>
+                (r.GetString(0), Round(r.GetValue(1)), Round(r.GetValue(2)), Convert.ToInt64(r.GetValue(3))), ct);
+        }
+
+        /// <summary>
+        /// Bir gruptaki en yavaş span'ler. Operation alanına span'in ait olduğu istek (endpoint/job) yazılır;
+        /// aynı trace'te servise birden çok istek gelebildiği için span'in kendi atası bulunur.
+        /// </summary>
+        public async Task<List<RequestRowResponse>> GetSpanSamplesAsync(
+            string service, string category, string name, string target, DateTimeOffset from, DateTimeOffset to, int limit,
+            CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new()
+            {
+                ["category"] = category,
+                ["name"] = name,
+                ["target"] = target,
+                ["limit"] = (uint)Math.Clamp(limit, 1, 50)
+            };
+            string sql = $$"""
+                SELECT Timestamp, TraceId, SpanId, Duration / 1e6, StatusCode, StatusMessage, http_code
+                FROM {{ServiceSpansSource(service, from, to, p)}}
+                WHERE cat = {category:String} AND op_name = {name:String} AND target = {target:String}
+                ORDER BY Duration DESC
+                LIMIT {limit:UInt32}
+                """;
+            List<RequestRowResponse> rows = await db.QueryAsync(sql, p, r => new RequestRowResponse
+            {
+                Timestamp = r.GetDateTime(0),
+                TraceId = r.GetString(1),
+                SpanId = r.GetString(2),
+                Service = service,
+                DurationMs = Round(r.GetValue(3)),
+                Status = r.GetString(4),
+                StatusMessage = NullIfEmpty(r.GetString(5)),
+                HttpStatusCode = NullIfEmpty(r.GetString(6))
+            }, ct);
+            if (rows.Count == 0) return rows;
+
+            // Örneklerin trace'lerinde bu servisin span'leri: atadan köke yürüyüp isteğin adını bul
+            Dictionary<string, object> q = new()
+            {
+                ["service"] = service,
+                ["traceIds"] = rows.Select(r => r.TraceId).Distinct().ToArray()
+            };
+            string spansSql = $$"""
+                SELECT SpanId, ParentSpanId, SpanName, SpanAttributes['{{JobNameAttribute}}'] != '' OR SpanKind = '{{ServerSpanKind}}'
+                FROM {{TracesTable}}
+                WHERE TraceId IN {traceIds:Array(String)} AND ServiceName = {service:String}
+                """;
+            Dictionary<string, (string? Parent, string Name, bool IsRoot)> spans = (await db.QueryAsync(spansSql, q, r =>
+                (Id: r.GetString(0), Parent: NullIfEmpty(r.GetString(1)), Name: r.GetString(2), IsRoot: Convert.ToBoolean(r.GetValue(3))), ct))
+                .GroupBy(s => s.Id).ToDictionary(g => g.Key, g => (g.First().Parent, g.First().Name, g.First().IsRoot));
+
+            foreach (RequestRowResponse row in rows)
+            {
+                string? current = row.SpanId;
+                while (current is not null && spans.TryGetValue(current, out var span))
+                {
+                    if (span.IsRoot)
+                    {
+                        row.Operation = span.Name;
+                        break;
+                    }
+                    current = span.Parent;
+                }
+            }
+            return rows;
+        }
+
+        #endregion
+
         private static string RangeCondition(DateTimeOffset from, DateTimeOffset to, Dictionary<string, object> p)
         {
             p["fromMs"] = from.ToUnixTimeMilliseconds();
             p["toMs"] = to.ToUnixTimeMilliseconds();
             return "Timestamp >= fromUnixTimestamp64Milli({fromMs:Int64}) AND Timestamp <= fromUnixTimestamp64Milli({toMs:Int64})";
         }
-
-        #endregion
 
         private static string BuildWhere(TraceFilter f, Dictionary<string, object> p)
         {

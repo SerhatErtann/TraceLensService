@@ -19,6 +19,10 @@ namespace TraceLensService.Common
         public const string TimeSeries = "/timeseries";
         public const string Requests = "/requests";
 
+        // Servis Detayı: sürenin dağılımı + metod/DB/dış çağrı grupları, ve bir grubun en yavaş çağrıları
+        public const string ServiceBreakdown = "/services/{service}/breakdown";
+        public const string ServiceSpanSamples = "/services/{service}/spans";
+
         public const string TraceDetail = "traces/{traceId}";
 
         // Genel Bakış ve Sorunlar: servis + scheduler birlikte

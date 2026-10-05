@@ -9,7 +9,7 @@ namespace TraceLensService.Utils
     /// </summary>
     public static class TraceAnalyzer
     {
-        private const int NPlusOneThreshold = 10;
+        private const int NPlusOneThreshold = GlobalConsts.NPlusOneCallsPerRequest;
         private const long LargePayloadBytes = 1_000_000;
         private const double DominantSpanRatio = 0.5;
 

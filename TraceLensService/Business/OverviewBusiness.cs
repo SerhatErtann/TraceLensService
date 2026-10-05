@@ -41,6 +41,8 @@ namespace TraceLensService.Business
                 List<ServiceCardResponse> cards = statsTask.Result.Select(s =>
                 {
                     int slowOps = issues.Count(i => i.Service == s.Service && i.App == s.App && i.IsSlow);
+                    // Sorunlar sayfasıyla aynı: hata oranı yüksek bir endpoint/job varsa servis toplamı düşük olsa da "hatalı"
+                    bool errorOps = issues.Any(i => i.Service == s.Service && i.App == s.App && i.HasErrors);
                     List<(AppKind App, OperationSummaryResponse Row)> appOps = operations.Rows
                         .Where(o => o.App == s.App && o.Row.Service == s.Service)
                         .ToList();
@@ -49,7 +51,7 @@ namespace TraceLensService.Business
                     {
                         Service = s.Service,
                         App = s.App,
-                        Status = s.ErrorRate >= IssueErrorRate ? "error" : slowOps > 0 ? "slow" : "ok",
+                        Status = s.ErrorRate >= IssueErrorRate || errorOps ? "error" : slowOps > 0 ? "slow" : "ok",
                         Count = s.Count,
                         AvgMs = s.AvgMs,
                         P95Ms = s.P95Ms,

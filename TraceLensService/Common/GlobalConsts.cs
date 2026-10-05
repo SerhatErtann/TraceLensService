@@ -61,6 +61,18 @@ namespace TraceLensService.Common
         /// <summary>Genel Bakış'taki "en yavaş", "en çok hata veren" ve "son hatalar" listelerinin uzunluğu.</summary>
         public const int OverviewListSize = 5;
 
+        // --- Servis Detayı ---
+        /// <summary>Span grupları: servis içindeki metod (Internal span), DB sorgusu ve dış HTTP çağrısı.</summary>
+        public const string SpanCategoryMethod = "method";
+        public const string SpanCategoryDb = "db";
+        public const string SpanCategoryCall = "call";
+        public const int SpanGroupLimit = 300;
+        public const int SpanSampleLimit = 10;
+        /// <summary>Bir DB sorgusu istek başına bu kadar ya da daha çok çalışıyorsa N+1 şüphesi (trace ipucuyla aynı sınır).</summary>
+        public const int NPlusOneCallsPerRequest = 10;
+        /// <summary>Çağrılan servisin span'i aralığın biraz dışında kalabilir; eşleştirmede bu kadar pay bırakılır.</summary>
+        public const int CalleeMatchMarginMs = 60_000;
+
         // --- Bildirim formatları (Notifications:Format) ---
         public const string TeamsFormat = "teams";
         public const string SlackFormat = "slack";
@@ -78,6 +90,10 @@ namespace TraceLensService.Common
             public const string AlertsNotRetrieved = "Alarmlar alınamadı.";
             public const string OverviewNotRetrieved = "Genel bakış alınamadı.";
             public const string IssuesNotRetrieved = "Sorunlar alınamadı.";
+            public const string BreakdownNotRetrieved = "Servis detayı alınamadı.";
+            public const string SpanSamplesNotRetrieved = "En yavaş çağrılar alınamadı.";
+            public const string ServiceRequired = "Servis adı zorunlu.";
+            public const string InvalidSpanCategory = "Geçersiz tür (method, db veya call olmalı).";
             public const string NotificationNotConfigured = "Bildirim ayarlı değil (Notifications:WebhookUrl).";
             public const string NotificationSent = "Test bildirimi gönderildi.";
             public const string ThresholdsNotRetrieved = "Eşikler alınamadı.";
