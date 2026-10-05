@@ -17,14 +17,20 @@ var app = builder.Build();
 
 app.MapGet("/health", () => "ok");
 
-// Değişken gecikme ve ara sıra hata: dashboard'da yavaş/hatalı istek örnekleri üretir.
+// Gerçekçi dağılım: çoğu istek hızlı, bir kısmı yavaş (eşiği aşar), az bir kısmı hata verir.
+// Dashboard'da normal / turuncu (yavaş) / kırmızı (hatalı) satırların hepsi görünsün diye.
 app.MapGet("/payments/{orderId:int}/status", async (int orderId) =>
 {
-    await Task.Delay(Random.Shared.Next(20, 400));
+    int roll = Random.Shared.Next(100);
 
-    if (Random.Shared.Next(100) < 8)
+    if (roll < 5)
+    {
+        await Task.Delay(Random.Shared.Next(15, 60));
         return Results.Problem("Banka servisi yanıt vermedi", statusCode: 502);
+    }
 
+    // %10 yavaş (250-600 ms), geri kalanı hızlı (20-120 ms)
+    await Task.Delay(roll < 15 ? Random.Shared.Next(250, 600) : Random.Shared.Next(20, 120));
     return Results.Ok(new { orderId, status = "paid" });
 });
 
