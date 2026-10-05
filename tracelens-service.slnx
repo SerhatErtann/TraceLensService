@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/Samples/">
+    <Project Path="Samples/Sample.OrderService/Sample.OrderService.csproj" />
+    <Project Path="Samples/Sample.PaymentService/Sample.PaymentService.csproj" />
+    <Project Path="Samples/Sample.Scheduler/Sample.Scheduler.csproj" />
+  </Folder>
+  <Project Path="TraceLens.Instrumentation/TraceLens.Instrumentation.csproj" />
+  <Project Path="TraceLensService/TraceLensService.csproj" />
+</Solution>
