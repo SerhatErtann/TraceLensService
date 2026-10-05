@@ -77,6 +77,8 @@ namespace TraceLensService.Business
                         P95Ms = overall.P95Ms,
                         ErrorCount = overall.ErrorCount,
                         ErrorRate = overall.ErrorRate,
+                        SlowCount = overall.SlowCount,
+                        SlowRate = overall.SlowRate,
                         OpenIssueCount = issues.Count,
                         ActiveAlertCount = _activeAlerts.Active.Count
                     }

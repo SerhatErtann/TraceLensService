@@ -229,8 +229,10 @@ namespace TraceLensService.Contexts
         public async Task<ServiceStats> GetOverallStatsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
         {
             Dictionary<string, object> p = [];
+            string thresholdSql = thresholds.Current.ToSqlNanos(p);
             string sql = $$"""
-                SELECT count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6, countIf(StatusCode = '{{ErrorStatus}}')
+                SELECT count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6, countIf(StatusCode = '{{ErrorStatus}}'),
+                       countIf(Duration > {{thresholdSql}})
                 FROM {{TracesTable}}
                 WHERE {{RangeCondition(from, to, p)}} AND {{AnyRootCondition}}
                 """;
@@ -238,7 +240,8 @@ namespace TraceLensService.Contexts
             {
                 long count = Convert.ToInt64(r.GetValue(0));
                 return new ServiceStats(string.Empty, AppKind.Service, count,
-                    count == 0 ? 0 : Round(r.GetValue(1)), count == 0 ? 0 : Round(r.GetValue(2)), Convert.ToInt64(r.GetValue(3)));
+                    count == 0 ? 0 : Round(r.GetValue(1)), count == 0 ? 0 : Round(r.GetValue(2)), Convert.ToInt64(r.GetValue(3)),
+                    Convert.ToInt64(r.GetValue(4)));
             }, ct))[0];
         }
 

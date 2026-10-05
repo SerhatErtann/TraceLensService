@@ -10,6 +10,10 @@ namespace TraceLensService.Models.Responses.Overview
         public double P95Ms { get; set; }
         public long ErrorCount { get; set; }
         public double ErrorRate { get; set; }
+
+        /// <summary>Süresi kendi operasyonunun eşiğini aşan istek/çalışma sayısı.</summary>
+        public long SlowCount { get; set; }
+        public double SlowRate { get; set; }
         public int OpenIssueCount { get; set; }
         public int ActiveAlertCount { get; set; }
     }
