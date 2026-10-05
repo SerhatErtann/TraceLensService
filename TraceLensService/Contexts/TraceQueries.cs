@@ -4,6 +4,7 @@ using TraceLensService.Enums;
 using TraceLensService.Models.Internal;
 using TraceLensService.Models.Options;
 using TraceLensService.Models.Responses.Analysis;
+using TraceLensService.Models.Responses.Live;
 using TraceLensService.Models.Responses.Overview;
 using TraceLensService.Models.Responses.Shared;
 using TraceLensService.Models.Responses.Traces;
@@ -574,6 +575,151 @@ namespace TraceLensService.Contexts
                     result[(svc, op)] = error;
             }
             return result;
+        }
+
+        #endregion
+
+        #region Canlı
+
+        /// <summary>Canlı sayfanın ortak koşulu: kök span'ler (uygulama türüne göre), servis ve operasyon.</summary>
+        private static string LiveCondition(AppKind? app, string? service, string? operation, Dictionary<string, object> p)
+        {
+            List<string> conditions =
+            [
+                app switch
+                {
+                    AppKind.Service => $"SpanKind = '{ServerSpanKind}' AND ResourceAttributes['{AppTypeAttribute}'] = '{ServiceAppType}'",
+                    AppKind.Scheduler => $"SpanAttributes['{JobNameAttribute}'] != ''",
+                    _ => AnyRootCondition
+                }
+            ];
+            if (!string.IsNullOrWhiteSpace(service))
+            {
+                p["service"] = service;
+                conditions.Add("ServiceName = {service:String}");
+            }
+            if (!string.IsNullOrWhiteSpace(operation))
+            {
+                p["operation"] = operation;
+                conditions.Add("SpanName = {operation:String}");
+            }
+            return string.Join(" AND ", conditions);
+        }
+
+        /// <summary>
+        /// Son gelen istekler, en yeni üstte. <paramref name="since"/> verilirse ondan LiveLookbackSeconds geriden başlar
+        /// (geç yazılan span'ler için); tekrarları dashboard SpanId ile ayıklar.
+        /// </summary>
+        public Task<List<LiveRowResponse>> GetLiveRowsAsync(AppKind? app, string? service, string? operation,
+            bool onlySlow, bool onlyErrors, DateTimeOffset? since, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new() { ["limit"] = (uint)(since is null ? LiveInitialRows : LiveMaxRows) };
+            string where = LiveCondition(app, service, operation, p);
+            if (since is DateTimeOffset s)
+            {
+                p["sinceMs"] = s.AddSeconds(-LiveLookbackSeconds).ToUnixTimeMilliseconds();
+                where += " AND Timestamp > fromUnixTimestamp64Milli({sinceMs:Int64})";
+            }
+            else
+            {
+                where += " AND Timestamp > now64() - INTERVAL 5 MINUTE";
+            }
+            if (onlySlow) where += $" AND Duration > {thresholds.Current.ToSqlNanos(p)}";
+            if (onlyErrors) where += $" AND StatusCode = '{ErrorStatus}'";
+
+            string sql = $$"""
+                SELECT Timestamp, TraceId, SpanId, ServiceName, SpanName, Duration / 1e6, StatusCode, StatusMessage,
+                       SpanAttributes['http.response.status_code'], SpanAttributes['job.status'], {{AppKindExpr}}
+                FROM {{TracesTable}}
+                WHERE {{where}}
+                ORDER BY Timestamp DESC
+                LIMIT {limit:UInt32}
+                """;
+            return db.QueryAsync(sql, p, r => new LiveRowResponse
+            {
+                Timestamp = r.GetDateTime(0),
+                TraceId = r.GetString(1),
+                SpanId = r.GetString(2),
+                Service = r.GetString(3),
+                Operation = r.GetString(4),
+                DurationMs = Round(r.GetValue(5)),
+                Status = r.GetString(6),
+                StatusMessage = NullIfEmpty(r.GetString(7)),
+                HttpStatusCode = NullIfEmpty(r.GetString(8)),
+                JobStatus = NullIfEmpty(r.GetString(9)),
+                App = Enum.Parse<AppKind>(r.GetString(10))
+            }, ct);
+        }
+
+        /// <summary>[windowStart, windowEnd) aralığının özeti ve saniye başına istek / eşiği aşan / hatalı.</summary>
+        public async Task<LiveStatsResponse> GetLiveStatsAsync(AppKind? app, string? service, string? operation,
+            DateTimeOffset windowStart, DateTimeOffset windowEnd, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new()
+            {
+                ["fromMs"] = windowStart.ToUnixTimeMilliseconds(),
+                ["toMs"] = windowEnd.ToUnixTimeMilliseconds()
+            };
+            string where = LiveCondition(app, service, operation, p)
+                + " AND Timestamp >= fromUnixTimestamp64Milli({fromMs:Int64}) AND Timestamp < fromUnixTimestamp64Milli({toMs:Int64})";
+            string thresholdSql = thresholds.Current.ToSqlNanos(p);
+
+            string summarySql = $$"""
+                SELECT count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6,
+                       countIf(Duration > {{thresholdSql}}), countIf(StatusCode = '{{ErrorStatus}}')
+                FROM {{TracesTable}} WHERE {{where}}
+                """;
+            string secondsSql = $$"""
+                SELECT toUnixTimestamp(toStartOfSecond(Timestamp)) AS s, count(),
+                       countIf(Duration > {{thresholdSql}}), countIf(StatusCode = '{{ErrorStatus}}')
+                FROM {{TracesTable}} WHERE {{where}}
+                GROUP BY s
+                """;
+            string topErrorSql = $$"""
+                SELECT ServiceName, count() AS c FROM {{TracesTable}}
+                WHERE {{where}} AND StatusCode = '{{ErrorStatus}}'
+                GROUP BY ServiceName ORDER BY c DESC LIMIT 1
+                """;
+
+            var summaryTask = db.QueryAsync(summarySql, p, r => (Count: Convert.ToInt64(r.GetValue(0)), Avg: r.GetValue(1), P95: r.GetValue(2),
+                Slow: Convert.ToInt64(r.GetValue(3)), Errors: Convert.ToInt64(r.GetValue(4))), ct);
+            var secondsTask = db.QueryAsync(secondsSql, p, r => (Second: Convert.ToInt64(r.GetValue(0)), Count: Convert.ToInt64(r.GetValue(1)),
+                Slow: Convert.ToInt64(r.GetValue(2)), Errors: Convert.ToInt64(r.GetValue(3))), ct);
+            var topErrorTask = db.QueryAsync(topErrorSql, p, r => (Service: r.GetString(0), Count: Convert.ToInt64(r.GetValue(1))), ct);
+            await Task.WhenAll(summaryTask, secondsTask, topErrorTask);
+
+            var summary = summaryTask.Result[0];
+            var bySecond = secondsTask.Result.ToDictionary(s => s.Second);
+            long startSec = windowStart.ToUnixTimeSeconds();
+            int windowSeconds = (int)(windowEnd - windowStart).TotalSeconds;
+            List<LiveSecondResponse> seconds = Enumerable.Range(0, windowSeconds).Select(i =>
+            {
+                bySecond.TryGetValue(startSec + i, out var s);
+                return new LiveSecondResponse
+                {
+                    Time = DateTimeOffset.FromUnixTimeSeconds(startSec + i).UtcDateTime,
+                    Count = s.Count,
+                    SlowCount = s.Slow,
+                    ErrorCount = s.Errors
+                };
+            }).ToList();
+
+            var topError = topErrorTask.Result.FirstOrDefault();
+            return new LiveStatsResponse
+            {
+                WindowSeconds = windowSeconds,
+                LagSeconds = LiveLagSeconds,
+                WindowEnd = windowEnd.UtcDateTime,
+                Count = summary.Count,
+                RequestsPerSecond = Math.Round(seconds.TakeLast(LiveRateSeconds).Average(s => (double)s.Count), 1),
+                AvgMs = summary.Count == 0 ? 0 : Round(summary.Avg),
+                P95Ms = summary.Count == 0 ? 0 : Round(summary.P95),
+                SlowCount = summary.Slow,
+                ErrorCount = summary.Errors,
+                TopErrorService = topError.Service,
+                TopErrorServiceCount = topError.Count,
+                Seconds = seconds
+            };
         }
 
         #endregion

@@ -82,6 +82,20 @@ namespace TraceLensService.Common
         /// <summary>İstek anatomisi bu kadar son istekten çıkarılır (tüm span ağacı okunduğu için örneklem).</summary>
         public const int AnatomySampleSize = 300;
 
+        // --- Canlı ---
+        /// <summary>
+        /// Span'ler servisten ~5 sn'de bir toplu çıkar, collector 2 sn'de bir yazar: bir istek bittikten birkaç saniye sonra
+        /// görünür. Sayılar bu kadar geriden biten pencereyle hesaplanır.
+        /// </summary>
+        public const int LiveLagSeconds = 7;
+        public const int LiveWindowSeconds = 60;
+        /// <summary>İstek/sn bu kadar son saniyenin ortalaması.</summary>
+        public const int LiveRateSeconds = 10;
+        /// <summary>Geç yazılan (uzun süren ya da geç gönderilen) span'ler kaçmasın diye imleçten bu kadar geri bakılır.</summary>
+        public const int LiveLookbackSeconds = 30;
+        public const int LiveInitialRows = 50;
+        public const int LiveMaxRows = 200;
+
         // --- Bildirim formatları (Notifications:Format) ---
         public const string TeamsFormat = "teams";
         public const string SlackFormat = "slack";
@@ -108,6 +122,7 @@ namespace TraceLensService.Common
             public const string OutcomesNotRetrieved = "Sonuç dağılımı alınamadı.";
             public const string InstancesNotRetrieved = "Instance listesi alınamadı.";
             public const string ServiceMapNotRetrieved = "Servis haritası alınamadı.";
+            public const string LiveNotRetrieved = "Canlı veriler alınamadı.";
             public const string InvalidSpanCategory = "Geçersiz tür (method, db veya call olmalı).";
             public const string NotificationNotConfigured = "Bildirim ayarlı değil (Notifications:WebhookUrl).";
             public const string NotificationSent = "Test bildirimi gönderildi.";

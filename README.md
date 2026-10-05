@@ -151,6 +151,7 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 | `GET api/v1/{service\|scheduler}/histogram` | Süre dağılımı (logaritmik aralıklar) + p50/p90/p99 |
 | `GET api/v1/{service\|scheduler}/outcomes` | Durum kodu (görevlerde başarılı/başarısız) dağılımı ve hata türleri |
 | `GET api/v1/{service\|scheduler}/instances` | Servisin çalışan kopyaları (service.instance.id) ayrı ayrı |
+| `GET api/v1/live?since=&app=&service=&onlySlow=&onlyErrors=` | Canlı: since'ten sonra gelen istekler (en yeni üstte, 30 sn geri bakarak; tekrarlar spanId ile ayıklanır) ve son 60 saniyenin özeti (veri gecikmesi nedeniyle 7 sn geriden) |
 | `GET api/v1/service-map` | Servis haritası: servisler, görevler, veritabanları ve aralarındaki çağrılar |
 | `GET api/v1/traces/{traceId}` | Waterfall + kök neden ipuçları |
 | `GET api/v1/alerts` | Açık ve kapanan alarmlar |

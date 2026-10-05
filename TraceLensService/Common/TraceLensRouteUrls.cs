@@ -30,6 +30,7 @@ namespace TraceLensService.Common
         public const string Instances = "/instances";
 
         public const string ServiceMap = "service-map";
+        public const string Live = "live";
 
         public const string TraceDetail = "traces/{traceId}";
 

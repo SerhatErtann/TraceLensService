@@ -9,6 +9,7 @@ using TraceLensService.Models.Responses.Alerts;
 using TraceLensService.Models.Responses.Analysis;
 using TraceLensService.Models.Responses.Auth;
 using TraceLensService.Models.Responses.Issues;
+using TraceLensService.Models.Responses.Live;
 using TraceLensService.Models.Responses.Overview;
 using TraceLensService.Models.Responses.ServiceDetail;
 using TraceLensService.Models.Responses.Settings;
@@ -96,6 +97,15 @@ namespace TraceLensService.Endpoints
             })
             .WithDescription("Servis haritası: servisler, görevler, veritabanları ve aralarındaki çağrılar")
             .Produces<DataResponse<ServiceMapResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Overview);
+
+            api.MapGet(TraceLensRouteUrls.Live, async ([FromServices] LiveBusiness business, [AsParameters] LiveRequest request) =>
+            {
+                DataResponse<LiveResponse> response = await business.GetLive(request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Canlı: since'ten sonra gelen istekler (en yeni üstte) ve son 60 saniyenin özeti (app: service | scheduler)")
+            .Produces<DataResponse<LiveResponse>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Overview);
 
             #endregion
