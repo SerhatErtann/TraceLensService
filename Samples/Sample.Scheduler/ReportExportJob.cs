@@ -1,22 +1,32 @@
-using TraceLens.Instrumentation;
-
 namespace Sample.Scheduler;
 
 /// <summary>Raporu indirir; yavaş ve büyük yanıtlı bir job örneği. Ara sıra hata verir.</summary>
-public sealed class ReportExportJob(IJobTracer jobTracer, ILogger<ReportExportJob> logger, IHttpClientFactory http)
-    : TracedBackgroundService(jobTracer, logger)
+public sealed class ReportExportJob(ILogger<ReportExportJob> logger, IHttpClientFactory http) : BackgroundService
 {
-    protected override string JobName => "ReportExport";
-    protected override TimeSpan Interval => TimeSpan.FromSeconds(15);
+    private const string JobName = "ReportExport";
 
-    protected override async Task RunJobAsync(CancellationToken cancellationToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using PeriodicTimer timer = new(TimeSpan.FromSeconds(15));
+        do
+        {
+            try
+            {
+                await JobTracing.RunAsync(JobName, RunAsync, stoppingToken);
+            }
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Job {JobName} başarısız oldu", JobName);
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    private async Task RunAsync(CancellationToken cancellationToken)
     {
         var report = await http.CreateClient("orders").GetStringAsync("/orders/report", cancellationToken);
 
-        using var span = TraceLensTracer.StartMethod();
-        span?.SetTag("report.bytes", report.Length);
-
         if (Random.Shared.Next(100) < 15)
-            throw new IOException("Rapor dosya sunucusuna yazılamadı");
+            throw new IOException($"Rapor ({report.Length} bayt) dosya sunucusuna yazılamadı");
     }
 }

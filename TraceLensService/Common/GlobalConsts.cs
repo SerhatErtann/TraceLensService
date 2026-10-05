@@ -29,7 +29,7 @@ namespace TraceLensService.Common
         /// <summary>Birden fazla TraceLensService örneği çalışıyorsa diğerlerinin değişikliği bu sürede görülür.</summary>
         public const int ThresholdRefreshSeconds = 60;
 
-        // --- otel_traces alan değerleri (TraceLens.Instrumentation paketi ile birebir eşleşmeli) ---
+        // --- otel_traces alan değerleri (servislerin OpenTelemetry kurulumu ile birebir eşleşmeli; bkz. README) ---
         public const string ErrorStatus = "Error";
         public const string ServerSpanKind = "Server";
         public const string AppTypeAttribute = "tracelens.app_type";

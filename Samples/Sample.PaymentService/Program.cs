@@ -1,10 +1,19 @@
-using TraceLens.Instrumentation;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddTraceLens(builder.Configuration);
+
+// ---- TraceLens: istek süreleri ve trace'ler (README → "Bir servisi TraceLens'e bağlamak") ----
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r
+        .AddService(builder.Configuration["TraceLens:ServiceName"]!)
+        .AddAttributes([new("tracelens.app_type", "service")]))
+    .WithTracing(t => t
+        .AddAspNetCoreInstrumentation(o => o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/health"))
+        .AddHttpClientInstrumentation()
+        .AddOtlpExporter(o => o.Endpoint = new Uri(builder.Configuration["TraceLens:OtlpEndpoint"]!)));
 
 var app = builder.Build();
-app.UseTraceLens();
 
 app.MapGet("/health", () => "ok");
 

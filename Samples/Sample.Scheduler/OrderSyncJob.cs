@@ -1,15 +1,28 @@
-using TraceLens.Instrumentation;
-
 namespace Sample.Scheduler;
 
 /// <summary>Sipariş listesini çekip birkaçının detayına bakar (OrderService → PaymentService zinciri).</summary>
-public sealed class OrderSyncJob(IJobTracer jobTracer, ILogger<OrderSyncJob> logger, IHttpClientFactory http)
-    : TracedBackgroundService(jobTracer, logger)
+public sealed class OrderSyncJob(ILogger<OrderSyncJob> logger, IHttpClientFactory http) : BackgroundService
 {
-    protected override string JobName => "OrderSync";
-    protected override TimeSpan Interval => TimeSpan.FromSeconds(5);
+    private const string JobName = "OrderSync";
 
-    protected override async Task RunJobAsync(CancellationToken cancellationToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using PeriodicTimer timer = new(TimeSpan.FromSeconds(5));
+        do
+        {
+            try
+            {
+                await JobTracing.RunAsync(JobName, RunAsync, stoppingToken);
+            }
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Job {JobName} başarısız oldu", JobName);
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    private async Task RunAsync(CancellationToken cancellationToken)
     {
         var client = http.CreateClient("orders");
         await client.GetStringAsync("/orders", cancellationToken);

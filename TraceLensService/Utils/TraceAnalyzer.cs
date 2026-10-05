@@ -49,7 +49,7 @@ namespace TraceLensService.Utils
                     SpanId = span.SpanId,
                     ParentSpanId = span.ParentSpanId,
                     Service = span.Service,
-                    Name = span.Name,
+                    Name = SpanNamer.DisplayName(span),
                     Kind = span.Kind,
                     Timestamp = span.Timestamp,
                     StartOffsetMs = Math.Round((span.Timestamp - start).TotalMilliseconds, 2),

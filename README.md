@@ -7,12 +7,12 @@ Arayüz ayrı repoda: **tracelens-frontend**.
 
 ```
  Sizin servisleriniz            OTel Collector        ClickHouse            TraceLensService         tracelens-frontend
- (+ TraceLens.Instrumentation)  (Docker, 4317)        (Docker, 8123)        (bu repo, 5100)          (Vue, 5180)
+ (+ OpenTelemetry paketleri)    (Docker, 4317)        (Docker, 8123)        (bu repo, 5100)          (Vue, 5180)
  "bu istek 410ms sürdü"  ───→   ölçümleri alır  ───→  saklar         ←───   sorgular, alarm   ←───   tarayıcıda gösterir
                                                                             üretir, Teams'e yazar
 ```
 
-1. Servise istek gelir. **TraceLens.Instrumentation** paketi isteğin ve içindeki her adımın (SQL, başka servise çağrı, metod) süresini ölçer.
+1. Servise istek gelir. Servise kurulu resmi **OpenTelemetry** paketleri isteğin ve içindeki her adımın (SQL, başka servise çağrı, metod) süresini ölçer (bkz. "Bir servisi TraceLens'e bağlamak").
 2. Ölçümleri **OTel Collector**'e gönderir; Collector bunları **ClickHouse**'a yazar.
 3. **TraceLensService** ClickHouse'tan özet çıkarır, her dakika eşik kontrolü yapar ve gerekirse Teams/Slack'e bildirim atar.
 4. **tracelens-frontend** TraceLensService'ten veriyi alıp gösterir.
@@ -35,8 +35,7 @@ tracelens-service/
 │   ├─ Enums/
 │   ├─ Models/                   Requests, Responses, DbModels, Options, Internal
 │   └─ Utils/                    TraceAnalyzer, AlertWorker, AlertNotifier, ActiveAlertCache
-├─ TraceLens.Instrumentation/    Diğer servislerin ekleyeceği NuGet paketi
-└─ Samples/                      Sadece test verisi üretmek için demo servisler
+└─ Samples/                      Test verisi üreten demo servisler; aynı zamanda "servisi bağlama" rehberinin örneği
     ├─ Sample.OrderService       (5101)  → PaymentService'i çağırır, bilerek N+1 sorgu ve yavaş metod içerir
     ├─ Sample.PaymentService     (5102)  değişken gecikme, ara sıra 502
     └─ Sample.Scheduler                  5 sn'de bir OrderService'e istek atan job'lar
@@ -159,25 +158,74 @@ Birden fazla TraceLensService örneği çalışıyorsa bir örnekteki değişikl
 - `Format`: `teams` (Teams Workflows → *"Post to a channel when a webhook request is received"*), `slack` veya `generic`.
 - **WebhookUrl gizlidir**; dosyaya değil ortam değişkenine yazın: `Notifications__WebhookUrl`.
 
-## Bir servise TraceLens eklemek
+## Bir servisi TraceLens'e bağlamak
 
-```csharp
-builder.Services.AddTraceLens(builder.Configuration);
-// ...
-app.UseTraceLens();   // request/response body boyutlarını kaydeder
+Ayrı bir TraceLens paketi yok; servisler **nuget.org'daki resmi OpenTelemetry paketlerini** doğrudan kurar.
+`Samples/` klasöründeki üç proje bu rehberin birebir uygulanmış halidir.
+
+### 1. Paketler
+
 ```
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore        # web servisleri için
+dotnet add package OpenTelemetry.Instrumentation.Http              # başka servislere HttpClient çağrıları
+dotnet add package OpenTelemetry.Instrumentation.EntityFrameworkCore --prerelease   # EF Core kullanıyorsa
+dotnet add package OpenTelemetry.Instrumentation.SqlClient         # EF yoksa (Dapper/ADO.NET); EF ile birlikte eklemeyin
+```
+
+### 2. Ayar (`appsettings.json`)
 
 ```json
 "TraceLens": {
   "ServiceName": "help-center-service",
-  "AppType": "Service",              // scheduler ise "Scheduler"
-  "OtlpEndpoint": "http://localhost:4317",
-  "UseEntityFrameworkCore": true,
-  "UseSqlClient": false              // Dapper/ADO.NET kullanılıyorsa true
+  "OtlpEndpoint": "http://localhost:4317"
 }
 ```
 
-Scheduler job'ları: `TracedBackgroundService`'ten türetin ya da mevcut job'u `IJobTracer.RunAsync("JobAdi", ct => ...)` ile sarın.
-Kritik bir metodun süresini ayrıca görmek için: `using var span = TraceLensTracer.StartMethod();`
+`ServiceName` dashboard'da görünecek addır. `OtlpEndpoint` OTel Collector'ün adresidir (sunucuda `http://<sunucu>:4317`).
 
-Otomatik yakalananlar: gelen HTTP istekleri, giden HttpClient çağrıları (servisler arası `traceparent` taşınır), EF Core/SqlClient sorguları, exception'lar.
+### 3. `Program.cs`, web servisi
+
+```csharp
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r
+        .AddService(builder.Configuration["TraceLens:ServiceName"]!)
+        .AddAttributes([new("tracelens.app_type", "service")]))      // Services sayfasında listelenir
+    .WithTracing(t => t
+        .AddSource("TraceLens")                                        // kendi metod ölçümleriniz (adım 5)
+        .AddAspNetCoreInstrumentation(o => o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/health"))
+        .AddHttpClientInstrumentation()
+        .AddEntityFrameworkCoreInstrumentation()                       // veya .AddSqlClientInstrumentation()
+        .AddOtlpExporter(o => o.Endpoint = new Uri(builder.Configuration["TraceLens:OtlpEndpoint"]!)));
+```
+
+### 4. Scheduler
+
+`Program.cs`'te aynı kurulum. Tek farkı `"tracelens.app_type", "scheduler"` olması; scheduler'da `AddAspNetCoreInstrumentation` gerekmez.
+Sonra [`Samples/Sample.Scheduler/JobTracing.cs`](Samples/Sample.Scheduler/JobTracing.cs) dosyasını projenize kopyalayın ve her job çalıştırmasını sarın:
+
+```csharp
+await JobTracing.RunAsync("OrderSync", ct => DoWorkAsync(ct), stoppingToken);
+```
+
+Bu sarmalayıcı her çalıştırmayı ayrı bir trace yapar ve `job.name` etiketini ekler; Schedulers sayfası job'ları bu etiketten tanır.
+Hangfire, Quartz veya şirketin Scheduler kütüphanesi kullanılıyorsa job'un çalıştığı metodun içini aynı şekilde sarmak yeterli.
+
+### 5. Kritik bir metodun süresini ayrıca görmek (opsiyonel)
+
+```csharp
+static readonly ActivitySource Source = new("TraceLens");
+
+using var span = Source.StartActivity("OrderReportService.BuildAsync");
+span?.SetTag("order.id", id);   // trace detayında görünür
+```
+
+### Otomatik gelenler
+
+Gelen HTTP istekleri, giden HttpClient çağrıları (servisler arası `traceparent` taşınır, A → B → C tek trace'te birleşir),
+EF Core/SQL sorguları ve exception'lar. DB ve HTTP çağrısı adları dashboard'da okunur hale getirilir
+(`main` → `SELECT Orders`, `GET` → `GET payment-service/payments/5/status`).

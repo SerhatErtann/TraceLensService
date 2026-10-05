@@ -1,11 +1,21 @@
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Sample.OrderService;
-using TraceLens.Instrumentation;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1) Tek satır: tracing + exporter
-builder.Services.AddTraceLens(builder.Configuration);
+// ---- TraceLens: istek süreleri ve trace'ler (README → "Bir servisi TraceLens'e bağlamak") ----
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r
+        .AddService(builder.Configuration["TraceLens:ServiceName"]!)
+        .AddAttributes([new("tracelens.app_type", "service")]))
+    .WithTracing(t => t
+        .AddSource(Tracing.SourceName)
+        .AddAspNetCoreInstrumentation(o => o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/health"))
+        .AddHttpClientInstrumentation()
+        .AddEntityFrameworkCoreInstrumentation()
+        .AddOtlpExporter(o => o.Endpoint = new Uri(builder.Configuration["TraceLens:OtlpEndpoint"]!)));
 
 builder.Services.AddDbContext<OrderDb>(o => o.UseSqlite("Data Source=orders.db"));
 builder.Services.AddScoped<OrderReportService>();
@@ -13,9 +23,6 @@ builder.Services.AddHttpClient("payment", c =>
     c.BaseAddress = new Uri(builder.Configuration["PaymentServiceUrl"] ?? "http://localhost:5102"));
 
 var app = builder.Build();
-
-// 2) Payload boyutu middleware'i
-app.UseTraceLens();
 
 using (var scope = app.Services.CreateScope())
     await OrderDb.SeedAsync(scope.ServiceProvider.GetRequiredService<OrderDb>());
