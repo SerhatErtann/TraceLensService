@@ -28,8 +28,9 @@ exporters:
   clickhouse:
     endpoint: tcp://clickhouse:9000?dial_timeout=10s
     database: otel
-    username: tracelens
-    password: tracelens
+    # docker-compose'daki CLICKHOUSE_USER / CLICKHOUSE_PASSWORD ile aynı değerler (.env)
+    username: ${env:CLICKHOUSE_USER}
+    password: ${env:CLICKHOUSE_PASSWORD}
     traces_table_name: otel_traces
     create_schema: true
     ttl: 168h          # 7 gün saklanır

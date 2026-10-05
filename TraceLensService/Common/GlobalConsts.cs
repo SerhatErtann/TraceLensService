@@ -5,6 +5,7 @@ namespace TraceLensService.Common
         public const string ConfigLine = "Config/appsettings.json";
         public const string DefaultCorsPolicy = "DefaultCorsPolicy";
         public const string SwaggerIsEnabled = "Swagger:IsEnabled";
+        public const string HealthUrl = "/health";
 
         public const string ClickHouseConnection = "ClickHouse";
         public const string ClickHouseHttpClient = "clickhouse";

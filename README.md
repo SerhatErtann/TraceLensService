@@ -22,9 +22,11 @@ Arayüz ayrı repoda: **tracelens-frontend**.
 ```
 tracelens-service/
 ├─ tracelens-service.slnx        Visual Studio ile bunu açın
-├─ docker-compose.yml            ClickHouse + OTel Collector
+├─ docker-compose.yml            Geliştirme: ClickHouse + Collector · Sunucu (--profile app): + API + dashboard
+├─ .env.example                  Şifreler/adresler için örnek; ".env" olarak kopyalanır (git'e girmez)
+├─ nuget.config                  Paket kaynakları (CommonUtils Finoku feed'inde)
 ├─ otel-collector/               Collector ayarı (otel-collector.yaml) ve Dockerfile
-├─ TraceLensService/             API
+├─ TraceLensService/             API (+ Dockerfile)
 │   ├─ Business/                 TraceBusiness, AlertBusiness (Guard → DataResponse)
 │   ├─ Common/                   GlobalConsts, TraceLensRouteUrls
 │   ├─ Config/                   appsettings.json
@@ -53,9 +55,43 @@ tracelens-service/
 
 Durdurmak: Visual Studio'da Stop, Docker için `docker compose down` (veriler silinmez).
 
+## Sunucuya kurulum (Docker)
+
+Sunucuda Docker ve Docker Compose yeterli; .NET veya Node kurmaya gerek yok.
+
+1. İki repoyu **yan yana** klonlayın:
+   ```
+   git clone https://github.com/SerhatErtann/TraceLensService.git tracelens-service
+   git clone https://github.com/SerhatErtann/TraceLensFrontend.git tracelens-frontend
+   ```
+2. `tracelens-service` içinde `.env.example`'ı `.env` olarak kopyalayın ve doldurun. En az şunlar:
+   - `CLICKHOUSE_PASSWORD`: güçlü bir şifre
+   - `DASHBOARD_URL`: dashboard'un dışarıdan erişilen adresi (bildirimlerdeki link için)
+   - `NOTIFICATIONS_WEBHOOK_URL`: Teams/Slack bildirimi isteniyorsa
+3. Hepsini başlatın:
+   ```
+   docker compose --profile app up -d --build
+   ```
+4. Dashboard: `http://<sunucu>:8080` (port `.env`'deki `DASHBOARD_PORT`).
+5. Servisleriniz ölçümleri `http://<sunucu>:4317` adresine göndersin (`TraceLens:OtlpEndpoint`).
+
+| Container | Dışarıya açık mı | Not |
+|---|---|---|
+| `tracelens-dashboard` | Evet, `DASHBOARD_PORT` (8080) | nginx; `/api` isteklerini API'ye yönlendirir |
+| `otel-collector` | Evet, 4317 / 4318 | Servisler buraya gönderir |
+| `tracelens-service` | Hayır | Sadece dashboard üzerinden erişilir; Swagger kapalı |
+| `clickhouse` | Sadece sunucunun kendisinden (`127.0.0.1:8123`) | Veriler `clickhouse-data` volume'unda kalıcı |
+
+Güncellemek için: `git pull` (iki repoda da) → `docker compose --profile app up -d --build`.
+
+**Dikkat:**
+- `CLICKHOUSE_USER`/`CLICKHOUSE_PASSWORD` ClickHouse'un **ilk açılışında** kullanıcıyı oluşturur. Sonradan `.env`'de değiştirmek mevcut kullanıcının şifresini değiştirmez; önce ClickHouse'ta `ALTER USER` ile değiştirin.
+- Şifrede `;` karakteri kullanmayın (bağlantı cümlesinde ayraçtır).
+- **Alarm kontrolünü yalnızca bir TraceLensService örneği yapmalı.** Aynı veritabanına bağlı ikinci bir örnek (ör. sunucudaki container + yerelde Visual Studio'daki) çalışıyorsa, ikincisinde `Alerts__Enabled=false` verin; yoksa aynı alarm için iki bildirim gider.
+
 ## ClickHouse'taki verilere bakmak
 
-- Tarayıcıda **http://localhost:8123/play**, kullanıcı/şifre `tracelens` / `tracelens` (yalnızca yerel geliştirme).
+- Tarayıcıda **http://localhost:8123/play**, kullanıcı/şifre `.env`'deki değerler (yoksa `tracelens` / `tracelens`). ClickHouse yalnızca çalıştığı makineden erişilebilir; sunucudaki veriye bakmak için sunucuya SSH tüneliyle bağlanın.
 - Veya DBeaver → ClickHouse bağlantısı, host `localhost`, port `8123`, veritabanı `otel`.
 
 ```sql

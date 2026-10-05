@@ -69,4 +69,6 @@ if (builder.Configuration.GetValue<bool>(GlobalConsts.SwaggerIsEnabled))
 app.UseCors(GlobalConsts.DefaultCorsPolicy);
 app.UseRouting();
 app.MapEndpoints();
+// Container/yük dengeleyici sağlık kontrolü için
+app.MapGet(GlobalConsts.HealthUrl, () => Results.Ok("ok")).ExcludeFromDescription();
 app.Run();

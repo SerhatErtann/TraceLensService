@@ -6,3 +6,5 @@ obj/
 *.db-shm
 *.db-wal
 appsettings.*.local.json
+# Gizli bilgiler (şifreler, webhook URL'si); örnek için .env.example
+.env
