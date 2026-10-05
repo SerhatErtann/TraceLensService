@@ -6,6 +6,7 @@ using TraceLensService.Common;
 using TraceLensService.Enums;
 using TraceLensService.Models.Requests;
 using TraceLensService.Models.Responses.Alerts;
+using TraceLensService.Models.Responses.Analysis;
 using TraceLensService.Models.Responses.Auth;
 using TraceLensService.Models.Responses.Issues;
 using TraceLensService.Models.Responses.Overview;
@@ -86,6 +87,15 @@ namespace TraceLensService.Endpoints
             })
             .WithDescription("Sorunlar: eşiği aşan veya hata veren endpoint/job'lar, önce alarmı olanlar (service ile filtrelenebilir)")
             .Produces<DataResponse<List<IssueResponse>>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Overview);
+
+            api.MapGet(TraceLensRouteUrls.ServiceMap, async ([FromServices] OverviewBusiness business, [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<ServiceMapResponse> response = await business.GetServiceMap(request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Servis haritası: servisler, görevler, veritabanları ve aralarındaki çağrılar")
+            .Produces<DataResponse<ServiceMapResponse>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Overview);
 
             #endregion
@@ -246,6 +256,39 @@ namespace TraceLensService.Endpoints
             })
             .WithDescription("Bir metod / DB sorgusu / dış çağrının en yavaş örnekleri (category: method | db | call)")
             .Produces<DataResponse<List<RequestRowResponse>>>(StatusCodes.Status200OK);
+
+            group.MapGet(TraceLensRouteUrls.ServiceAnatomy, async ([FromServices] TraceBusiness business,
+                string service, [FromQuery] string? operation, [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<AnatomyResponse> response = await business.GetAnatomy(app, service, operation, request);
+                return Results.Ok(response);
+            })
+            .WithDescription("İstek anatomisi: bir endpoint/job'un son istekleri ortalamada hangi adımlardan oluşuyor")
+            .Produces<DataResponse<AnatomyResponse>>(StatusCodes.Status200OK);
+
+            group.MapGet(TraceLensRouteUrls.Histogram, async ([FromServices] TraceBusiness business, [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<HistogramResponse> response = await business.GetHistogram(app, request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Süre dağılımı (logaritmik aralıklar) ve p50/p90/p99")
+            .Produces<DataResponse<HistogramResponse>>(StatusCodes.Status200OK);
+
+            group.MapGet(TraceLensRouteUrls.Outcomes, async ([FromServices] TraceBusiness business, [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<OutcomeResponse> response = await business.GetOutcomes(app, request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Durum kodu (görevlerde sonuç) dağılımı ve hata türleri")
+            .Produces<DataResponse<OutcomeResponse>>(StatusCodes.Status200OK);
+
+            group.MapGet(TraceLensRouteUrls.Instances, async ([FromServices] TraceBusiness business, [AsParameters] TraceFilterRequest request) =>
+            {
+                DataResponse<List<InstanceResponse>> response = await business.GetInstances(app, request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Servisin çalışan kopyaları (service.instance.id) ayrı ayrı")
+            .Produces<DataResponse<List<InstanceResponse>>>(StatusCodes.Status200OK);
         }
     }
 }

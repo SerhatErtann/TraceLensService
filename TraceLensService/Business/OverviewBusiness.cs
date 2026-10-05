@@ -29,10 +29,15 @@ namespace TraceLensService.Business
                 Task<List<ServiceStats>> statsTask = _traceQueries.GetServiceStatsAsync(from, to);
                 Task<ServiceStats> overallTask = _traceQueries.GetOverallStatsAsync(from, to);
                 Task<Dictionary<(string, AppKind), List<double?>>> trendsTask = _traceQueries.GetServiceTrendsAsync(from, to, OverviewTrendBuckets);
-                Task<List<TimeBucketResponse>> timelineTask = _traceQueries.GetOverallTimeSeriesAsync(from, to, TimeBuckets.For(to - from));
+                int bucketSeconds = TimeBuckets.For(to - from);
+                Task<List<TimeBucketResponse>> timelineTask = _traceQueries.GetOverallTimeSeriesAsync(from, to, bucketSeconds);
                 Task<List<RecentErrorResponse>> recentErrorsTask = _traceQueries.GetRecentErrorsAsync(from, to, OverviewListSize);
                 Task<Operations> operationsTask = LoadOperationsAsync(from, to, service: null);
-                await Task.WhenAll(statsTask, overallTask, trendsTask, timelineTask, recentErrorsTask, operationsTask);
+                // Karşılaştırma: hemen önceki eşit uzunluktaki dönem
+                DateTimeOffset previousFrom = from - (to - from);
+                Task<ServiceStats> previousTask = _traceQueries.GetOverallStatsAsync(previousFrom, from);
+                Task<List<TimeBucketResponse>> previousTimelineTask = _traceQueries.GetOverallTimeSeriesAsync(previousFrom, from, bucketSeconds);
+                await Task.WhenAll(statsTask, overallTask, trendsTask, timelineTask, recentErrorsTask, operationsTask, previousTask, previousTimelineTask);
 
                 Operations operations = operationsTask.Result;
                 List<IssueResponse> issues = BuildIssues(operations);
@@ -41,8 +46,6 @@ namespace TraceLensService.Business
                 List<ServiceCardResponse> cards = statsTask.Result.Select(s =>
                 {
                     int slowOps = issues.Count(i => i.Service == s.Service && i.App == s.App && i.IsSlow);
-                    // Sorunlar sayfasıyla aynı: hata oranı yüksek bir endpoint/job varsa servis toplamı düşük olsa da "hatalı"
-                    bool errorOps = issues.Any(i => i.Service == s.Service && i.App == s.App && i.HasErrors);
                     List<(AppKind App, OperationSummaryResponse Row)> appOps = operations.Rows
                         .Where(o => o.App == s.App && o.Row.Service == s.Service)
                         .ToList();
@@ -51,7 +54,7 @@ namespace TraceLensService.Business
                     {
                         Service = s.Service,
                         App = s.App,
-                        Status = s.ErrorRate >= IssueErrorRate || errorOps ? "error" : slowOps > 0 ? "slow" : "ok",
+                        Status = CardStatus(s, issues),
                         Count = s.Count,
                         AvgMs = s.AvgMs,
                         P95Ms = s.P95Ms,
@@ -74,9 +77,23 @@ namespace TraceLensService.Business
                 .ToList();
 
                 ServiceStats overall = overallTask.Result;
+                ServiceStats previous = previousTask.Result;
                 double seconds = Math.Max(1, (to - from).TotalSeconds);
                 response.Success(new OverviewResponse
                 {
+                    PreviousTotals = new PeriodTotalsResponse
+                    {
+                        From = previousFrom.UtcDateTime,
+                        To = from.UtcDateTime,
+                        RequestCount = previous.Count,
+                        AvgMs = previous.AvgMs,
+                        P95Ms = previous.P95Ms,
+                        ErrorCount = previous.ErrorCount,
+                        ErrorRate = previous.ErrorRate,
+                        SlowCount = previous.SlowCount,
+                        SlowRate = previous.SlowRate
+                    },
+                    PreviousTimeline = previousTimelineTask.Result,
                     From = from.UtcDateTime,
                     To = to.UtcDateTime,
                     TrendBucketSeconds = (int)Math.Ceiling(seconds / OverviewTrendBuckets),
@@ -120,6 +137,92 @@ namespace TraceLensService.Business
                 response.Success(BuildIssues(await LoadOperationsAsync(from, to, request.Service)));
                 return response;
             }, GeneralConsts.IssuesNotRetrieved);
+
+        public Task<DataResponse<ServiceMapResponse>> GetServiceMap(TraceFilterRequest request)
+            => Guard(async () =>
+            {
+                DataResponse<ServiceMapResponse> response = new();
+                (DateTimeOffset from, DateTimeOffset to) = request.ResolveRange();
+
+                Task<List<ServiceStats>> statsTask = _traceQueries.GetServiceStatsAsync(from, to);
+                Task<Operations> operationsTask = LoadOperationsAsync(from, to, service: null);
+                Task<List<ServiceEdgeRow>> httpTask = _traceQueries.GetHttpEdgesAsync(from, to);
+                Task<List<ServiceEdgeRow>> dbTask = _traceQueries.GetDbEdgesAsync(from, to);
+                await Task.WhenAll(statsTask, operationsTask, httpTask, dbTask);
+
+                List<IssueResponse> issues = BuildIssues(operationsTask.Result);
+                Dictionary<string, ServiceMapNodeResponse> nodes = statsTask.Result.ToDictionary(s => s.Service, s => new ServiceMapNodeResponse
+                {
+                    Id = s.Service,
+                    Name = s.Service,
+                    Kind = s.App == AppKind.Service ? "service" : "scheduler",
+                    Count = s.Count,
+                    AvgMs = s.AvgMs,
+                    ErrorRate = s.ErrorRate,
+                    Status = CardStatus(s, issues)
+                });
+
+                // Karşı tarafında span bulunmayan çağrı, aynı host:port'a giden eşleşmiş çağrılar varsa o servise sayılır
+                // (ör. servis yeniden başlarken kaybolan span'ler); yoksa ayrı "dış hedef" düğümü olur.
+                Dictionary<string, string> hostToService = httpTask.Result
+                    .Where(e => e.Callee is not null)
+                    .GroupBy(e => e.Host)
+                    .ToDictionary(g => g.Key, g => g.OrderByDescending(e => e.Count).First().Callee!);
+
+                IEnumerable<(string From, string To, string Kind, string Name, ServiceEdgeRow Row)> raw =
+                    httpTask.Result.Select(e =>
+                    {
+                        string? callee = e.Callee ?? hostToService.GetValueOrDefault(e.Host);
+                        return callee is not null
+                            ? (e.Caller, callee, "service", callee, e)
+                            : (e.Caller, $"ext:{e.Host}", "external", e.Host, e);
+                    })
+                    .Concat(dbTask.Result.Select(e => (e.Caller, $"db:{e.Host}", "database", e.Host, e)));
+
+                List<ServiceMapEdgeResponse> edges = [];
+                foreach (var group in raw.GroupBy(x => (x.From, x.To)))
+                {
+                    long count = group.Sum(x => x.Row.Count);
+                    edges.Add(new ServiceMapEdgeResponse
+                    {
+                        From = group.Key.From,
+                        To = group.Key.To,
+                        Count = count,
+                        AvgMs = count == 0 ? 0 : Math.Round(group.Sum(x => x.Row.AvgMs * x.Row.Count) / count, 2),
+                        // Birleşen parçaların p95'i yeniden hesaplanamaz; en büyük parçanınki gösterilir
+                        P95Ms = group.MaxBy(x => x.Row.Count).Row.P95Ms,
+                        ErrorCount = group.Sum(x => x.Row.ErrorCount)
+                    });
+
+                    var first = group.First();
+                    if (!nodes.ContainsKey(first.To))
+                        nodes[first.To] = new ServiceMapNodeResponse { Id = first.To, Name = first.Name, Kind = first.Kind };
+                }
+
+                // Veritabanı ve dış hedeflerin kendi istatistiği yok: gelen çağrılardan hesaplanır
+                foreach (ServiceMapNodeResponse node in nodes.Values.Where(n => n.Kind is "database" or "external"))
+                {
+                    List<ServiceMapEdgeResponse> incoming = edges.Where(e => e.To == node.Id).ToList();
+                    node.Count = incoming.Sum(e => e.Count);
+                    node.AvgMs = node.Count == 0 ? 0 : Math.Round(incoming.Sum(e => e.AvgMs * e.Count) / node.Count, 2);
+                    node.ErrorRate = node.Count == 0 ? 0 : (double)incoming.Sum(e => e.ErrorCount) / node.Count;
+                    node.Status = node.ErrorRate >= IssueErrorRate ? "error" : "ok";
+                }
+
+                response.Success(new ServiceMapResponse { Nodes = [.. nodes.Values], Edges = edges });
+                return response;
+            }, GeneralConsts.ServiceMapNotRetrieved);
+
+        /// <summary>
+        /// Kart durumu (Genel Bakış, Servis haritası): hata oranı %5'i geçen servis ya da hata oranı yüksek bir
+        /// endpoint/job'u olan → "error" (Sorunlar ile aynı); ortalaması eşiğini aşan endpoint/job'u olan → "slow".
+        /// </summary>
+        private static string CardStatus(ServiceStats s, List<IssueResponse> issues)
+        {
+            List<IssueResponse> own = issues.Where(i => i.Service == s.Service && i.App == s.App).ToList();
+            if (s.ErrorRate >= IssueErrorRate || own.Any(i => i.HasErrors)) return "error";
+            return own.Any(i => i.IsSlow) ? "slow" : "ok";
+        }
 
         /// <summary>Servis ve scheduler operasyon özetleri + operasyon başına en sık hata.</summary>
         private sealed record Operations(

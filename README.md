@@ -138,15 +138,20 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 | Uç | Açıklama |
 |---|---|
 | `POST api/v1/auth/login` · `POST api/v1/auth/logout` · `GET api/v1/auth/me` | Giriş (bkz. "Dashboard girişi") |
-| `GET api/v1/overview` | Genel Bakış: tüm servis/scheduler özetleri, kart grafikleri (24 nokta), açık sorun ve alarm sayısı |
+| `GET api/v1/overview` | Genel Bakış: tüm servis/scheduler özetleri, kart grafikleri (24 nokta), açık sorun ve alarm sayısı, önceki dönem toplamları ve grafiği |
 | `GET api/v1/issues` | Sorunlar: ortalaması eşiği aşan veya hata oranı %5'i geçen endpoint/job'lar, en sık hata ve alarm bilgisiyle (`service` ile filtrelenebilir) |
 | `GET api/v1/{service\|scheduler}/services` | Filtre listesi |
 | `GET api/v1/{service\|scheduler}/summary` | Operasyon bazında sayı, ortalama, p95, eşiği aşan, hata |
 | `GET api/v1/{service\|scheduler}/totals` | KPI kartları |
-| `GET api/v1/{service\|scheduler}/timeseries` | Zaman grafiği |
+| `GET api/v1/{service\|scheduler}/timeseries` | Zaman grafiği (ortalama, p50/p90/p95/p99, istek, eşiği aşan, hatalı) |
 | `GET api/v1/{service\|scheduler}/requests` | Sayfalı istek listesi |
 | `GET api/v1/{service\|scheduler}/services/{service}/breakdown` | Servis Detayı: süre dağılımı (kendi kodu / dış çağrı / DB) ve metod, DB sorgusu, dış çağrı grupları |
 | `GET api/v1/{service\|scheduler}/services/{service}/spans?category=&name=&target=` | Bir metod / DB sorgusu / dış çağrının en yavaş 10 örneği (`category`: method, db, call) |
+| `GET api/v1/{service\|scheduler}/services/{service}/anatomy?operation=` | İstek anatomisi: bir endpoint/job'un son 300 isteğinde her adım istek başına kaç kez ve ne kadar sürüyor |
+| `GET api/v1/{service\|scheduler}/histogram` | Süre dağılımı (logaritmik aralıklar) + p50/p90/p99 |
+| `GET api/v1/{service\|scheduler}/outcomes` | Durum kodu (görevlerde başarılı/başarısız) dağılımı ve hata türleri |
+| `GET api/v1/{service\|scheduler}/instances` | Servisin çalışan kopyaları (service.instance.id) ayrı ayrı |
+| `GET api/v1/service-map` | Servis haritası: servisler, görevler, veritabanları ve aralarındaki çağrılar |
 | `GET api/v1/traces/{traceId}` | Waterfall + kök neden ipuçları |
 | `GET api/v1/alerts` | Açık ve kapanan alarmlar |
 | `POST api/v1/alerts/test-notification` | Webhook'u dener |

@@ -22,6 +22,14 @@ namespace TraceLensService.Common
         // Servis Detayı: sürenin dağılımı + metod/DB/dış çağrı grupları, ve bir grubun en yavaş çağrıları
         public const string ServiceBreakdown = "/services/{service}/breakdown";
         public const string ServiceSpanSamples = "/services/{service}/spans";
+        public const string ServiceAnatomy = "/services/{service}/anatomy";
+
+        // Dağılımlar: ortak filtrelerle (service, operation, range ...)
+        public const string Histogram = "/histogram";
+        public const string Outcomes = "/outcomes";
+        public const string Instances = "/instances";
+
+        public const string ServiceMap = "service-map";
 
         public const string TraceDetail = "traces/{traceId}";
 

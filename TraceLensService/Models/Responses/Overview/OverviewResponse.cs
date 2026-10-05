@@ -6,6 +6,10 @@ namespace TraceLensService.Models.Responses.Overview
     public class OverviewResponse
     {
         public OverviewTotalsResponse Totals { get; set; } = new();
+        /// <summary>Bir önceki eşit uzunluktaki dönem (ör. 1 sa seçiliyse ondan önceki 1 sa).</summary>
+        public PeriodTotalsResponse PreviousTotals { get; set; } = new();
+        /// <summary>Önceki dönemin zaman grafiği; dashboard bunu seçili döneme kaydırıp kesikli çizer.</summary>
+        public List<TimeBucketResponse> PreviousTimeline { get; set; } = [];
         public List<ServiceCardResponse> Services { get; set; } = [];
 
         /// <summary>Tüm uygulamaların yanıt süresi grafiği ve eşik çizgisi (varsayılan eşik).</summary>

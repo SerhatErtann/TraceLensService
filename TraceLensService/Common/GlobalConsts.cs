@@ -73,6 +73,15 @@ namespace TraceLensService.Common
         /// <summary>Çağrılan servisin span'i aralığın biraz dışında kalabilir; eşleştirmede bu kadar pay bırakılır.</summary>
         public const int CalleeMatchMarginMs = 60_000;
 
+        // --- Dağılımlar ---
+        /// <summary>Süre dağılımı aralık sınırları (ms). Logaritmik: hem 2 ms'lik hem 20 s'lik istekler okunur kalır.</summary>
+        public static readonly double[] HistogramEdgesMs =
+            [1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 70, 100, 150, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 5000, 7000, 10000, 15000, 20000, 30000, 60000];
+        public const int OutcomeErrorTypeLimit = 10;
+        public const int InstanceLimit = 50;
+        /// <summary>İstek anatomisi bu kadar son istekten çıkarılır (tüm span ağacı okunduğu için örneklem).</summary>
+        public const int AnatomySampleSize = 300;
+
         // --- Bildirim formatları (Notifications:Format) ---
         public const string TeamsFormat = "teams";
         public const string SlackFormat = "slack";
@@ -93,6 +102,12 @@ namespace TraceLensService.Common
             public const string BreakdownNotRetrieved = "Servis detayı alınamadı.";
             public const string SpanSamplesNotRetrieved = "En yavaş çağrılar alınamadı.";
             public const string ServiceRequired = "Servis adı zorunlu.";
+            public const string OperationRequired = "Servis ve operasyon adı zorunlu.";
+            public const string AnatomyNotRetrieved = "İstek anatomisi alınamadı.";
+            public const string HistogramNotRetrieved = "Süre dağılımı alınamadı.";
+            public const string OutcomesNotRetrieved = "Sonuç dağılımı alınamadı.";
+            public const string InstancesNotRetrieved = "Instance listesi alınamadı.";
+            public const string ServiceMapNotRetrieved = "Servis haritası alınamadı.";
             public const string InvalidSpanCategory = "Geçersiz tür (method, db veya call olmalı).";
             public const string NotificationNotConfigured = "Bildirim ayarlı değil (Notifications:WebhookUrl).";
             public const string NotificationSent = "Test bildirimi gönderildi.";

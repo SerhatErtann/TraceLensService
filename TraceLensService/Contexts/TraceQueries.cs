@@ -3,6 +3,7 @@ using TraceLensService.Common;
 using TraceLensService.Enums;
 using TraceLensService.Models.Internal;
 using TraceLensService.Models.Options;
+using TraceLensService.Models.Responses.Analysis;
 using TraceLensService.Models.Responses.Overview;
 using TraceLensService.Models.Responses.Shared;
 using TraceLensService.Models.Responses.Traces;
@@ -114,25 +115,35 @@ namespace TraceLensService.Contexts
             string thresholdSql = thresholds.Current.ToSqlNanos(p);
 
             string sql = $$"""
-                SELECT toStartOfInterval(Timestamp, toIntervalSecond({bucket:UInt32})) AS t,
-                       count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6,
-                       countIf(Duration > {{thresholdSql}}), countIf(StatusCode = '{{ErrorStatus}}')
+                SELECT toStartOfInterval(Timestamp, toIntervalSecond({bucket:UInt32})) AS t, {{TimeBucketColumns(thresholdSql)}}
                 FROM {{TracesTable}}
                 WHERE {{where}}
                 GROUP BY t
                 ORDER BY t
                 """;
 
-            return db.QueryAsync(sql, p, r => new TimeBucketResponse
-            {
-                Time = r.GetDateTime(0),
-                Count = Convert.ToInt64(r.GetValue(1)),
-                AvgMs = Round(r.GetValue(2)),
-                P95Ms = Round(r.GetValue(3)),
-                SlowCount = Convert.ToInt64(r.GetValue(4)),
-                ErrorCount = Convert.ToInt64(r.GetValue(5))
-            }, ct);
+            return db.QueryAsync(sql, p, MapTimeBucket, ct);
         }
+
+        // Zaman grafiği bucket'ı: istek, ortalama, p50/p90/p95/p99, eşiği aşan, hatalı (t sütunundan sonra gelir)
+        private static string TimeBucketColumns(string thresholdSql) => $$"""
+            count(), avg(Duration) / 1e6, quantiles(0.5, 0.9, 0.95, 0.99)(Duration) AS q,
+            q[1] / 1e6, q[2] / 1e6, q[3] / 1e6, q[4] / 1e6,
+            countIf(Duration > {{thresholdSql}}), countIf(StatusCode = '{{ErrorStatus}}')
+            """;
+
+        private static TimeBucketResponse MapTimeBucket(System.Data.Common.DbDataReader r) => new()
+        {
+            Time = r.GetDateTime(0),
+            Count = Convert.ToInt64(r.GetValue(1)),
+            AvgMs = Round(r.GetValue(2)),
+            P50Ms = Round(r.GetValue(4)),
+            P90Ms = Round(r.GetValue(5)),
+            P95Ms = Round(r.GetValue(6)),
+            P99Ms = Round(r.GetValue(7)),
+            SlowCount = Convert.ToInt64(r.GetValue(8)),
+            ErrorCount = Convert.ToInt64(r.GetValue(9))
+        };
 
         public async Task<PagedResponse<RequestRowResponse>> GetRequestsAsync(
             TraceFilter filter, string sort, int limit, int offset, CancellationToken ct = default)
@@ -201,6 +212,167 @@ namespace TraceLensService.Contexts
                 ToStringMap(r.GetValue(9)),
                 ReadEvents(r.GetValue(10), r.GetValue(11), r.GetValue(12))), ct);
         }
+
+        #region Dağılımlar (Servisler/Görevler ve Servis Detayı)
+
+        /// <summary>Süre dağılımı: istekler HistogramEdgesMs aralıklarına dağıtılır, ayrıca p50/p90/p99.</summary>
+        public async Task<HistogramResponse> GetHistogramAsync(TraceFilter filter, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new() { ["edges"] = HistogramEdgesMs.Select(ThresholdOptions.ToNanos).ToArray() };
+            string where = BuildWhere(filter, p);
+            AppendOnlySlow(filter, p, ref where);
+
+            // arrayFirstIndex: 1 = ilk sınırdan kısa, 0 = son sınırdan uzun (son aralık)
+            string sql = $$"""
+                SELECT arrayFirstIndex(e -> Duration < e, {edges:Array(UInt64)}) AS b, count(), countIf(StatusCode = '{{ErrorStatus}}')
+                FROM {{TracesTable}}
+                WHERE {{where}}
+                GROUP BY b
+                """;
+            string summarySql = $$"""
+                SELECT count(), quantiles(0.5, 0.9, 0.99)(Duration) AS q, q[1] / 1e6, q[2] / 1e6, q[3] / 1e6
+                FROM {{TracesTable}}
+                WHERE {{where}}
+                """;
+            Task<List<(int Index, long Count, long Errors)>> bucketsTask = db.QueryAsync(sql, p, r =>
+                (Convert.ToInt32(r.GetValue(0)), Convert.ToInt64(r.GetValue(1)), Convert.ToInt64(r.GetValue(2))), ct);
+            Task<List<HistogramResponse>> summaryTask = db.QueryAsync(summarySql, p, r =>
+            {
+                long count = Convert.ToInt64(r.GetValue(0));
+                return new HistogramResponse
+                {
+                    Count = count,
+                    P50Ms = count == 0 ? 0 : Round(r.GetValue(2)),
+                    P90Ms = count == 0 ? 0 : Round(r.GetValue(3)),
+                    P99Ms = count == 0 ? 0 : Round(r.GetValue(4))
+                };
+            }, ct);
+            await Task.WhenAll(bucketsTask, summaryTask);
+
+            HistogramResponse result = summaryTask.Result[0];
+            // Aralık sırası: 1..N sınırlar, 0 = sonuncudan uzun → N+1. İlk ve son dolu aralık arası boşluksuz döner.
+            Dictionary<int, (long Count, long Errors)> byIndex = bucketsTask.Result
+                .ToDictionary(b => b.Index == 0 ? HistogramEdgesMs.Length + 1 : b.Index, b => (b.Count, b.Errors));
+            if (byIndex.Count == 0) return result;
+
+            for (int i = byIndex.Keys.Min(); i <= byIndex.Keys.Max(); i++)
+            {
+                byIndex.TryGetValue(i, out (long Count, long Errors) b);
+                result.Buckets.Add(new HistogramBucketResponse
+                {
+                    FromMs = i == 1 ? 0 : HistogramEdgesMs[i - 2],
+                    ToMs = i <= HistogramEdgesMs.Length ? HistogramEdgesMs[i - 1] : null,
+                    Count = b.Count,
+                    ErrorCount = b.Errors
+                });
+            }
+            return result;
+        }
+
+        /// <summary>Durum kodu (görevlerde sonuç) dağılımı ve hata türleri.</summary>
+        public async Task<OutcomeResponse> GetOutcomesAsync(TraceFilter filter, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new() { ["limit"] = (uint)OutcomeErrorTypeLimit };
+            string where = BuildWhere(filter, p);
+            AppendOnlySlow(filter, p, ref where);
+
+            string statusExpr = filter.App == AppKind.Service
+                ? "SpanAttributes['http.response.status_code']"
+                : $"if(SpanAttributes['job.status'] != '', SpanAttributes['job.status'], if(StatusCode = '{ErrorStatus}', 'failed', 'succeeded'))";
+            string statusSql = $$"""
+                SELECT {{statusExpr}} AS s, count(), countIf(StatusCode = '{{ErrorStatus}}')
+                FROM {{TracesTable}}
+                WHERE {{where}}
+                GROUP BY s
+                ORDER BY count() DESC
+                """;
+
+            // Hata türü: exception tipi (error.type ya da exception event'i), yoksa HTTP kodu, yoksa mesaj
+            string errorTypesSql = $$"""
+                SELECT multiIf(SpanAttributes['error.type'] != '' AND NOT match(SpanAttributes['error.type'], '^[0-9]+$'), SpanAttributes['error.type'],
+                               ex_type != '', ex_type,
+                               SpanAttributes['http.response.status_code'] != '', concat('HTTP ', SpanAttributes['http.response.status_code']),
+                               StatusMessage != '', StatusMessage,
+                               'Bilinmeyen hata') AS type,
+                       count(),
+                       anyIf(if(StatusMessage != '', StatusMessage, ex_message), if(StatusMessage != '', StatusMessage, ex_message) != ''),
+                       topK(1)(SpanName)[1],
+                       argMax(TraceId, Timestamp),
+                       max(Timestamp)
+                FROM (
+                    SELECT *, arrayFirst(a -> a['exception.type'] != '', `Events.Attributes`) AS ex,
+                           ex['exception.type'] AS ex_type, ex['exception.message'] AS ex_message
+                    FROM {{TracesTable}}
+                    WHERE {{where}} AND StatusCode = '{{ErrorStatus}}'
+                )
+                GROUP BY type
+                ORDER BY count() DESC
+                LIMIT {limit:UInt32}
+                """;
+
+            Task<List<StatusCountResponse>> statusesTask = db.QueryAsync(statusSql, p, r => new StatusCountResponse
+            {
+                Status = r.GetString(0),
+                Count = Convert.ToInt64(r.GetValue(1)),
+                ErrorCount = Convert.ToInt64(r.GetValue(2))
+            }, ct);
+            Task<List<ErrorTypeResponse>> typesTask = db.QueryAsync(errorTypesSql, p, r => new ErrorTypeResponse
+            {
+                Type = r.GetString(0),
+                Count = Convert.ToInt64(r.GetValue(1)),
+                ExampleMessage = NullIfEmpty(r.GetString(2)),
+                TopOperation = r.GetString(3),
+                LastTraceId = r.GetString(4),
+                LastSeen = r.GetDateTime(5)
+            }, ct);
+            await Task.WhenAll(statusesTask, typesTask);
+
+            return new OutcomeResponse
+            {
+                Count = statusesTask.Result.Sum(s => s.Count),
+                Statuses = statusesTask.Result,
+                ErrorTypes = typesTask.Result
+            };
+        }
+
+        /// <summary>Servisin çalışan kopyaları (service.instance.id) ayrı ayrı: biri diğerlerinden yavaş/hatalı mı?</summary>
+        public Task<List<InstanceResponse>> GetInstancesAsync(TraceFilter filter, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = [];
+            string where = BuildWhere(filter, p);
+            string thresholdSql = thresholds.Current.ToSqlNanos(p);
+            string sql = $$"""
+                SELECT ResourceAttributes['service.instance.id'] AS inst, any(ResourceAttributes['host.name']),
+                       count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6,
+                       countIf(Duration > {{thresholdSql}}), countIf(StatusCode = '{{ErrorStatus}}'), min(Timestamp), max(Timestamp)
+                FROM {{TracesTable}}
+                WHERE {{where}}
+                GROUP BY inst
+                ORDER BY max(Timestamp) DESC
+                LIMIT {{InstanceLimit}}
+                """;
+            return db.QueryAsync(sql, p, r => new InstanceResponse
+            {
+                InstanceId = r.GetString(0),
+                Host = NullIfEmpty(r.GetString(1)),
+                Count = Convert.ToInt64(r.GetValue(2)),
+                AvgMs = Round(r.GetValue(3)),
+                P95Ms = Round(r.GetValue(4)),
+                SlowCount = Convert.ToInt64(r.GetValue(5)),
+                ErrorCount = Convert.ToInt64(r.GetValue(6)),
+                FirstSeen = r.GetDateTime(7),
+                LastSeen = r.GetDateTime(8)
+            }, ct);
+        }
+
+        // İstek listesindeki "Sadece eşiği aşanlar" ile aynı koşul
+        private void AppendOnlySlow(TraceFilter filter, Dictionary<string, object> p, ref string where)
+        {
+            if (filter.OnlySlow)
+                where += $" AND Duration > {thresholds.Current.ToSqlNanos(p)}";
+        }
+
+        #endregion
 
         #region Genel Bakış / Sorunlar (servis ve scheduler birlikte)
 
@@ -287,23 +459,66 @@ namespace TraceLensService.Contexts
             string range = RangeCondition(from, to, p);
             string thresholdSql = thresholds.Current.ToSqlNanos(p);
             string sql = $$"""
-                SELECT toStartOfInterval(Timestamp, toIntervalSecond({bucket:UInt32})) AS t,
-                       count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6,
-                       countIf(Duration > {{thresholdSql}}), countIf(StatusCode = '{{ErrorStatus}}')
+                SELECT toStartOfInterval(Timestamp, toIntervalSecond({bucket:UInt32})) AS t, {{TimeBucketColumns(thresholdSql)}}
                 FROM {{TracesTable}}
                 WHERE {{range}} AND {{AnyRootCondition}}
                 GROUP BY t
                 ORDER BY t
                 """;
-            return db.QueryAsync(sql, p, r => new TimeBucketResponse
-            {
-                Time = r.GetDateTime(0),
-                Count = Convert.ToInt64(r.GetValue(1)),
-                AvgMs = Round(r.GetValue(2)),
-                P95Ms = Round(r.GetValue(3)),
-                SlowCount = Convert.ToInt64(r.GetValue(4)),
-                ErrorCount = Convert.ToInt64(r.GetValue(5))
-            }, ct);
+            return db.QueryAsync(sql, p, MapTimeBucket, ct);
+        }
+
+        /// <summary>
+        /// Servisler arası HTTP çağrıları: çağıran servis → çağrılan servis (karşı tarafın Server span'i) ya da span'i
+        /// yoksa host:port. Instrumented aynı host'a giden eşleşmeyen çağrılar iş katmanında o servise katılır.
+        /// </summary>
+        public Task<List<ServiceEdgeRow>> GetHttpEdgesAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new() { ["marginMs"] = (long)CalleeMatchMarginMs };
+            string range = RangeCondition(from, to, p);
+            string sql = $$"""
+                SELECT c.ServiceName, s.callee, c.host, count(), avg(c.Duration) / 1e6, quantile(0.95)(c.Duration) / 1e6,
+                       countIf(c.StatusCode = '{{ErrorStatus}}')
+                FROM (
+                    SELECT TraceId, SpanId, ServiceName, Duration, StatusCode,
+                           if(SpanAttributes['server.port'] = '', SpanAttributes['server.address'],
+                              concat(SpanAttributes['server.address'], ':', SpanAttributes['server.port'])) AS host
+                    FROM {{TracesTable}}
+                    WHERE {{range}} AND SpanKind = 'Client' AND SpanAttributes['http.request.method'] != ''
+                      AND NOT (mapContains(SpanAttributes, 'db.system') OR mapContains(SpanAttributes, 'db.system.name'))
+                ) AS c
+                LEFT JOIN (
+                    SELECT TraceId, ParentSpanId, ServiceName AS callee
+                    FROM {{TracesTable}}
+                    WHERE SpanKind = '{{ServerSpanKind}}'
+                      AND Timestamp >= fromUnixTimestamp64Milli({fromMs:Int64} - {marginMs:Int64})
+                      AND Timestamp <= fromUnixTimestamp64Milli({toMs:Int64} + {marginMs:Int64})
+                ) AS s ON s.TraceId = c.TraceId AND s.ParentSpanId = c.SpanId
+                GROUP BY c.ServiceName, s.callee, c.host
+                """;
+            return db.QueryAsync(sql, p, r => new ServiceEdgeRow(
+                r.GetString(0), NullIfEmpty(r.GetString(1)), r.GetString(2), Convert.ToInt64(r.GetValue(3)),
+                Round(r.GetValue(4)), Round(r.GetValue(5)), Convert.ToInt64(r.GetValue(6))), ct);
+        }
+
+        /// <summary>Servis → veritabanı (db.system · db.name) çağrıları.</summary>
+        public Task<List<ServiceEdgeRow>> GetDbEdgesAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = [];
+            string sql = $$"""
+                SELECT ServiceName,
+                       concat(if(SpanAttributes['db.system.name'] != '', SpanAttributes['db.system.name'], SpanAttributes['db.system']),
+                              if(SpanAttributes['db.namespace'] != '', concat(' · ', SpanAttributes['db.namespace']),
+                                 if(SpanAttributes['db.name'] != '', concat(' · ', SpanAttributes['db.name']), ''))) AS target,
+                       count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6, countIf(StatusCode = '{{ErrorStatus}}')
+                FROM {{TracesTable}}
+                WHERE {{RangeCondition(from, to, p)}}
+                  AND (mapContains(SpanAttributes, 'db.system') OR mapContains(SpanAttributes, 'db.system.name'))
+                GROUP BY ServiceName, target
+                """;
+            return db.QueryAsync(sql, p, r => new ServiceEdgeRow(
+                r.GetString(0), null, r.GetString(1), Convert.ToInt64(r.GetValue(2)),
+                Round(r.GetValue(3)), Round(r.GetValue(4)), Convert.ToInt64(r.GetValue(5))), ct);
         }
 
         /// <summary>En son hatalı istekler/çalışmalar (servis ve scheduler birlikte).</summary>
@@ -378,20 +593,30 @@ namespace TraceLensService.Contexts
         /// DB span'i "SELECT Orders", dış çağrı çağrılan servisin route'u (karşı taraf enstrümante değilse
         /// sayılar {id} yapılmış URL yolu). ClickHouse regex'i \b desteklemediği için kelime sınırı [^\w] ile yazılır.
         /// </summary>
-        private static string ServiceSpansSource(string service, DateTimeOffset from, DateTimeOffset to, Dictionary<string, object> p)
+        /// <param name="traceIds">Verilirse sadece bu trace'ler ve tüm türler (kök dahil) döner; istek anatomisi için.</param>
+        private static string ServiceSpansSource(string service, DateTimeOffset from, DateTimeOffset to, Dictionary<string, object> p,
+            string[]? traceIds = null)
         {
             p["service"] = service;
             p["marginMs"] = (long)CalleeMatchMarginMs;
             string range = RangeCondition(from, to, p);
+            string spanFilter = $"cat IN ('{SpanCategoryMethod}', '{SpanCategoryDb}', '{SpanCategoryCall}')";
+            if (traceIds is not null)
+            {
+                p["traceIds"] = traceIds;
+                // Kök span aralığın başında başlayıp çocukları sonra bitebilir; pay bırakılır
+                range = "Timestamp >= fromUnixTimestamp64Milli({fromMs:Int64} - {marginMs:Int64}) AND Timestamp <= fromUnixTimestamp64Milli({toMs:Int64} + {marginMs:Int64}) AND TraceId IN {traceIds:Array(String)}";
+                spanFilter = "1";
+            }
             return $$"""
                 (
-                    SELECT c.TraceId AS TraceId, c.SpanId AS SpanId, Timestamp, Duration, StatusCode, StatusMessage, http_code, cat,
+                    SELECT c.TraceId AS TraceId, c.SpanId AS SpanId, ParentSpanId, Timestamp, Duration, StatusCode, StatusMessage, http_code, cat,
                            multiIf(cat = '{{SpanCategoryDb}}', if(verb = '', SpanName, if(tbl = '', verb, concat(verb, ' ', tbl))),
                                    cat = '{{SpanCategoryCall}}', if(callee_op != '', callee_op, url_name),
                                    SpanName) AS op_name,
                            if(cat = '{{SpanCategoryCall}}', if(callee_service != '', callee_service, host), '') AS target
                     FROM (
-                        SELECT TraceId, SpanId, Timestamp, Duration, StatusCode, StatusMessage, SpanName,
+                        SELECT TraceId, SpanId, ParentSpanId, Timestamp, Duration, StatusCode, StatusMessage, SpanName,
                                SpanAttributes['http.response.status_code'] AS http_code,
                                {{SpanCategoryExpr}} AS cat,
                                if(SpanAttributes['db.query.text'] != '', SpanAttributes['db.query.text'], SpanAttributes['db.statement']) AS stmt,
@@ -413,9 +638,40 @@ namespace TraceLensService.Contexts
                           AND Timestamp >= fromUnixTimestamp64Milli({fromMs:Int64} - {marginMs:Int64})
                           AND Timestamp <= fromUnixTimestamp64Milli({toMs:Int64} + {marginMs:Int64})
                     ) AS s ON s.TraceId = c.TraceId AND s.ParentSpanId = c.SpanId
-                    WHERE cat IN ('{{SpanCategoryMethod}}', '{{SpanCategoryDb}}', '{{SpanCategoryCall}}')
+                    WHERE {{spanFilter}}
                 )
                 """;
+        }
+
+        /// <summary>
+        /// Bir endpoint'in (veya job'un) son <paramref name="limit"/> isteğinin kök span'leri ve bu trace'lerde
+        /// servisin tüm span'leri. Ağaç C# tarafında kurulur (TraceBusiness.GetAnatomy).
+        /// </summary>
+        public async Task<(List<(string TraceId, string SpanId, double DurationMs)> Roots, List<AnatomySpan> Spans)> GetAnatomySpansAsync(
+            AppKind app, string service, string operation, DateTimeOffset from, DateTimeOffset to, int limit, CancellationToken ct = default)
+        {
+            TraceFilter filter = new(app, from, to, service, operation);
+            Dictionary<string, object> p = new() { ["limit"] = (uint)limit };
+            string rootsSql = $$"""
+                SELECT TraceId, SpanId, Duration / 1e6
+                FROM {{TracesTable}}
+                WHERE {{BuildWhere(filter, p)}}
+                ORDER BY Timestamp DESC
+                LIMIT {limit:UInt32}
+                """;
+            List<(string TraceId, string SpanId, double DurationMs)> roots = await db.QueryAsync(rootsSql, p, r =>
+                (r.GetString(0), r.GetString(1), Convert.ToDouble(r.GetValue(2))), ct);
+            if (roots.Count == 0) return (roots, []);
+
+            Dictionary<string, object> q = [];
+            string spansSql = $$"""
+                SELECT TraceId, SpanId, ParentSpanId, Duration / 1e6, cat, op_name, target
+                FROM {{ServiceSpansSource(service, from, to, q, roots.Select(r => r.TraceId).Distinct().ToArray())}}
+                """;
+            List<AnatomySpan> spans = await db.QueryAsync(spansSql, q, r => new AnatomySpan(
+                r.GetString(0), r.GetString(1), NullIfEmpty(r.GetString(2)), Convert.ToDouble(r.GetValue(3)),
+                r.GetString(4), r.GetString(5), r.GetString(6)), ct);
+            return (roots, spans);
         }
 
         /// <summary>Metod / DB sorgusu / dış çağrı grupları, toplam süreye göre büyükten küçüğe.</summary>
