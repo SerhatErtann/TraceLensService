@@ -8,6 +8,7 @@ using TraceLensService.Models.Requests;
 using TraceLensService.Models.Responses.Alerts;
 using TraceLensService.Models.Responses.Settings;
 using TraceLensService.Models.Responses.Shared;
+using TraceLensService.Models.Responses.Thresholds;
 using TraceLensService.Models.Responses.Traces;
 using static TraceLensService.Common.GlobalConsts;
 
@@ -72,6 +73,49 @@ namespace TraceLensService.Endpoints
             .WithDescription("Eşik ve alarm ayarları (dashboard'un eşik çizgisi için)")
             .Produces<DataResponse<SettingsResponse>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Settings);
+
+            #endregion
+
+            #region Thresholds
+
+            api.MapGet(TraceLensRouteUrls.Thresholds, async ([FromServices] ThresholdBusiness business) =>
+            {
+                DataResponse<ThresholdListResponse> response = await business.GetThresholds();
+                return Results.Ok(response);
+            })
+            .WithDescription("Varsayılan eşik ve operasyon bazlı özel eşikler")
+            .Produces<DataResponse<ThresholdListResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Thresholds);
+
+            api.MapPut(TraceLensRouteUrls.ThresholdDefault, async ([FromServices] ThresholdBusiness business,
+                [FromBody] DefaultThresholdRequest request) =>
+            {
+                DataResponse<ThresholdListResponse> response = await business.SetDefault(request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Varsayılan eşiği değiştirir; anında geçerli olur")
+            .Produces<DataResponse<ThresholdListResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Thresholds);
+
+            api.MapPut(TraceLensRouteUrls.Thresholds, async ([FromServices] ThresholdBusiness business,
+                [FromBody] ThresholdRequest request) =>
+            {
+                DataResponse<ThresholdListResponse> response = await business.SetOverride(request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Bir operasyon için özel eşik ekler veya günceller")
+            .Produces<DataResponse<ThresholdListResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Thresholds);
+
+            api.MapDelete(TraceLensRouteUrls.Thresholds, async ([FromServices] ThresholdBusiness business,
+                [FromQuery] string? service, [FromQuery] string? operation) =>
+            {
+                DataResponse<ThresholdListResponse> response = await business.DeleteOverride(service, operation);
+                return Results.Ok(response);
+            })
+            .WithDescription("Özel eşiği kaldırır; operasyon varsayılan eşiğe döner")
+            .Produces<DataResponse<ThresholdListResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Thresholds);
 
             #endregion
 

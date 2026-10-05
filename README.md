@@ -79,6 +79,7 @@ SELECT Service, Operation, PeakValueMs, FiredAt, ResolvedAt FROM otel.tracelens_
 |---|---|---|
 | `otel_traces` | Her span (istek, SQL, HTTP çağrısı, metod) bir satır. Collector oluşturur | 7 gün |
 | `tracelens_alerts` | Alarmlar. TraceLensService açılışta oluşturur | 90 gün |
+| `tracelens_thresholds` | Eşikler (dashboard'dan yönetilir). TraceLensService açılışta oluşturur | Süresiz |
 
 ## API
 
@@ -95,10 +96,19 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 | `GET api/v1/alerts` | Açık ve kapanan alarmlar |
 | `POST api/v1/alerts/test-notification` | Webhook'u dener |
 | `GET api/v1/settings` | Eşik ve alarm ayarları |
+| `GET api/v1/thresholds` | Varsayılan eşik + özel eşikler |
+| `PUT api/v1/thresholds/default` | `{ thresholdMs }` varsayılan eşiği değiştirir |
+| `PUT api/v1/thresholds` | `{ service, operation, thresholdMs }` özel eşik ekler/günceller |
+| `DELETE api/v1/thresholds?service=&operation=` | Özel eşiği kaldırır |
 
 Ortak filtreler: `range` (15m, 1h, 24h, 7d) veya `from`/`to`, `service`, `operation`, `minDurationMs`, `onlyErrors`, `onlySlow`.
 
 ## Eşikler, alarmlar, bildirimler
+
+**Eşikler dashboard'dan yönetilir** (Ayarlar sayfası veya endpoint tablosundaki ✎). Değişiklik anında geçerli olur:
+grafik, "eşiği aşan" sayıları ve alarmlar yeni eşiğe göre hesaplanır. Eşikler `otel.tracelens_thresholds` tablosunda tutulur.
+`appsettings.json`'daki `Thresholds` bölümü yalnızca **ilk açılışta**, tablo boşken bir kez aktarılır; sonrasında dikkate alınmaz.
+Birden fazla TraceLensService örneği çalışıyorsa bir örnekteki değişiklik diğerlerine en geç 60 sn içinde yansır.
 
 `TraceLensService/Config/appsettings.json`:
 

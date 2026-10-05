@@ -42,6 +42,11 @@ builder.Services.AddHttpClient(GlobalConsts.WebhookHttpClient, c => c.Timeout = 
 builder.Services.AddSingleton<ClickHouseContext>();
 builder.Services.AddSingleton<TraceQueries>();
 builder.Services.AddSingleton<AlertQueries>();
+builder.Services.AddSingleton<ThresholdQueries>();
+
+// ---- Eşikler (ClickHouse'tan yüklenir, dashboard'dan yönetilir) ----
+builder.Services.AddSingleton<ThresholdStore>();
+builder.Services.AddHostedService<ThresholdSyncWorker>();
 
 // ---- Alarmlar ----
 builder.Services.AddSingleton<ActiveAlertCache>();
@@ -51,6 +56,7 @@ builder.Services.AddHostedService<AlertWorker>();
 builder.Services.AddScoped<IEndpoint, TraceLensEndpoints>();
 builder.Services.AddScoped<TraceBusiness>();
 builder.Services.AddScoped<AlertBusiness>();
+builder.Services.AddScoped<ThresholdBusiness>();
 
 var app = builder.Build();
 

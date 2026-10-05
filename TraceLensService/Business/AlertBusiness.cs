@@ -19,7 +19,7 @@ namespace TraceLensService.Business
         private readonly AlertQueries _alertQueries = serviceProvider.GetRequiredService<AlertQueries>();
         private readonly ActiveAlertCache _activeAlerts = serviceProvider.GetRequiredService<ActiveAlertCache>();
         private readonly AlertNotifier _notifier = serviceProvider.GetRequiredService<AlertNotifier>();
-        private readonly IOptionsMonitor<ThresholdOptions> _thresholds = serviceProvider.GetRequiredService<IOptionsMonitor<ThresholdOptions>>();
+        private readonly ThresholdStore _thresholds = serviceProvider.GetRequiredService<ThresholdStore>();
         private readonly IOptionsMonitor<AlertOptions> _alertOptions = serviceProvider.GetRequiredService<IOptionsMonitor<AlertOptions>>();
         private readonly IOptionsMonitor<NotificationOptions> _notificationOptions = serviceProvider.GetRequiredService<IOptionsMonitor<NotificationOptions>>();
 
@@ -59,8 +59,8 @@ namespace TraceLensService.Business
                 DataResponse<SettingsResponse> response = new();
                 response.Success(new SettingsResponse
                 {
-                    DefaultThresholdMs = _thresholds.CurrentValue.DefaultMs,
-                    ThresholdOverrides = _thresholds.CurrentValue.Overrides,
+                    DefaultThresholdMs = _thresholds.Current.DefaultMs,
+                    ThresholdOverrides = _thresholds.Current.Overrides,
                     AlertMetric = _alertOptions.CurrentValue.Metric,
                     AlertWindowMinutes = _alertOptions.CurrentValue.WindowMinutes,
                     NotificationsConfigured = _notifier.IsConfigured,

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 using System.Collections;
 using TraceLensService.Common;
 using TraceLensService.Enums;
@@ -6,6 +5,7 @@ using TraceLensService.Models.Internal;
 using TraceLensService.Models.Options;
 using TraceLensService.Models.Responses.Shared;
 using TraceLensService.Models.Responses.Traces;
+using TraceLensService.Utils;
 using static TraceLensService.Common.GlobalConsts;
 
 namespace TraceLensService.Contexts
@@ -14,7 +14,7 @@ namespace TraceLensService.Contexts
     /// otel_traces tablosu sorguları. "Kök span" = servislerde gelen HTTP isteği (Server span),
     /// scheduler'larda job çalıştırması (job.name attribute'u olan span).
     /// </summary>
-    public class TraceQueries(ClickHouseContext db, IOptionsMonitor<ThresholdOptions> thresholds)
+    public class TraceQueries(ClickHouseContext db, ThresholdStore thresholds)
     {
         public Task<List<string>> GetServicesAsync(AppKind app, CancellationToken ct = default)
         {
@@ -32,7 +32,7 @@ namespace TraceLensService.Contexts
         {
             Dictionary<string, object> p = [];
             string where = BuildWhere(filter, p);
-            ThresholdOptions threshold = thresholds.CurrentValue;
+            ThresholdOptions threshold = thresholds.Current;
             string thresholdSql = threshold.ToSqlNanos(p);
 
             string sql = $$"""
@@ -76,7 +76,7 @@ namespace TraceLensService.Contexts
         {
             Dictionary<string, object> p = [];
             string where = BuildWhere(filter, p);
-            ThresholdOptions threshold = thresholds.CurrentValue;
+            ThresholdOptions threshold = thresholds.Current;
             string thresholdSql = threshold.ToSqlNanos(p);
 
             string sql = $$"""
@@ -110,7 +110,7 @@ namespace TraceLensService.Contexts
         {
             Dictionary<string, object> p = new() { ["bucket"] = (uint)Math.Max(bucketSeconds, 1) };
             string where = BuildWhere(filter, p);
-            string thresholdSql = thresholds.CurrentValue.ToSqlNanos(p);
+            string thresholdSql = thresholds.Current.ToSqlNanos(p);
 
             string sql = $$"""
                 SELECT toStartOfInterval(Timestamp, toIntervalSecond({bucket:UInt32})) AS t,
@@ -139,7 +139,7 @@ namespace TraceLensService.Contexts
             Dictionary<string, object> p = [];
             string where = BuildWhere(filter, p);
             if (filter.OnlySlow)
-                where += $" AND Duration > {thresholds.CurrentValue.ToSqlNanos(p)}";
+                where += $" AND Duration > {thresholds.Current.ToSqlNanos(p)}";
 
             string orderBy = sort == "duration" ? "Duration DESC" : "Timestamp DESC";
             int safeLimit = Math.Clamp(limit, 1, MaxRequestPageSize);

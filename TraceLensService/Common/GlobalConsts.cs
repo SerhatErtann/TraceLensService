@@ -17,6 +17,16 @@ namespace TraceLensService.Common
         /// <summary>Alarm kayıtları; TraceLensService açılışta oluşturur (bkz. AlertQueries.EnsureSchemaAsync).</summary>
         public const string AlertsTable = "tracelens_alerts";
         public const int AlertRetentionDays = 90;
+        /// <summary>Eşikler; dashboard'dan yönetilir. İlk açılışta appsettings "Thresholds" bölümünden doldurulur.</summary>
+        public const string ThresholdsTable = "tracelens_thresholds";
+
+        // --- Eşik kuralları ---
+        /// <summary>Varsayılan eşik satırının anahtarı (servis/operasyon boş).</summary>
+        public const string DefaultThresholdKey = "*";
+        public const double MinThresholdMs = 1;
+        public const double MaxThresholdMs = 600_000;
+        /// <summary>Birden fazla TraceLensService örneği çalışıyorsa diğerlerinin değişikliği bu sürede görülür.</summary>
+        public const int ThresholdRefreshSeconds = 60;
 
         // --- otel_traces alan değerleri (TraceLens.Instrumentation paketi ile birebir eşleşmeli) ---
         public const string ErrorStatus = "Error";
@@ -51,8 +61,17 @@ namespace TraceLensService.Common
             public const string AlertsNotRetrieved = "Alarmlar alınamadı.";
             public const string NotificationNotConfigured = "Bildirim ayarlı değil (Notifications:WebhookUrl).";
             public const string NotificationSent = "Test bildirimi gönderildi.";
+            public const string ThresholdsNotRetrieved = "Eşikler alınamadı.";
+            public const string ThresholdNotSaved = "Eşik kaydedilemedi.";
+            public const string ThresholdNotDeleted = "Eşik silinemedi.";
+            public const string ThresholdOutOfRange = "Eşik 1 ms ile 600.000 ms arasında olmalı.";
+            public const string ThresholdOperationRequired = "Servis ve operasyon adı zorunlu.";
+            public const string ThresholdOverrideNotFound = "Bu operasyon için özel eşik tanımlı değil.";
+            public const string ThresholdSaved = "Eşik kaydedildi.";
+            public const string ThresholdDeleted = "Özel eşik kaldırıldı; varsayılan eşik geçerli.";
 
             // Swagger etiketleri
+            public const string Thresholds = "Thresholds";
             public const string Services = "Services";
             public const string Schedulers = "Schedulers";
             public const string Traces = "Traces";

@@ -19,5 +19,9 @@ namespace TraceLensService.Common
         public const string Alerts = "alerts";
         public const string AlertTestNotification = "alerts/test-notification";
         public const string Settings = "settings";
+
+        // GET: varsayılan + özel eşikler, PUT: özel eşik ekle/güncelle, DELETE ?service&operation: özel eşiği kaldır
+        public const string Thresholds = "thresholds";
+        public const string ThresholdDefault = "thresholds/default";
     }
 }
