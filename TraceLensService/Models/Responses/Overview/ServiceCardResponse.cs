@@ -19,6 +19,11 @@ namespace TraceLensService.Models.Responses.Overview
         /// <summary>Ortalaması eşiğini aşan endpoint/job sayısı.</summary>
         public int SlowOperationCount { get; set; }
 
+        /// <summary>Bu uygulamanın ortalaması en yüksek endpoint/job'u.</summary>
+        public string? SlowestOperation { get; set; }
+        public double? SlowestOperationAvgMs { get; set; }
+        public double? SlowestOperationThresholdMs { get; set; }
+
         /// <summary>Kart grafiğindeki eşik çizgisi (varsayılan eşik).</summary>
         public double ThresholdMs { get; set; }
 

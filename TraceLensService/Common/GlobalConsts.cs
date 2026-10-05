@@ -58,6 +58,8 @@ namespace TraceLensService.Common
         public const int IssueMinRequestCount = 3;
         /// <summary>Servis kartı grafiğindeki nokta sayısı.</summary>
         public const int OverviewTrendBuckets = 24;
+        /// <summary>Genel Bakış'taki "en yavaş", "en çok hata veren" ve "son hatalar" listelerinin uzunluğu.</summary>
+        public const int OverviewListSize = 5;
 
         // --- Bildirim formatları (Notifications:Format) ---
         public const string TeamsFormat = "teams";

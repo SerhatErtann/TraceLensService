@@ -3,6 +3,7 @@ using TraceLensService.Common;
 using TraceLensService.Enums;
 using TraceLensService.Models.Internal;
 using TraceLensService.Models.Options;
+using TraceLensService.Models.Responses.Overview;
 using TraceLensService.Models.Responses.Shared;
 using TraceLensService.Models.Responses.Traces;
 using TraceLensService.Utils;
@@ -277,6 +278,57 @@ namespace TraceLensService.Contexts
                     series[(int)row.Bucket] = row.Avg;
             }
             return result;
+        }
+
+        /// <summary>Tüm uygulamaların zaman grafiği (ortalama, p95, istek, eşiği aşan, hatalı).</summary>
+        public Task<List<TimeBucketResponse>> GetOverallTimeSeriesAsync(DateTimeOffset from, DateTimeOffset to, int bucketSeconds, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new() { ["bucket"] = (uint)Math.Max(bucketSeconds, 1) };
+            string range = RangeCondition(from, to, p);
+            string thresholdSql = thresholds.Current.ToSqlNanos(p);
+            string sql = $$"""
+                SELECT toStartOfInterval(Timestamp, toIntervalSecond({bucket:UInt32})) AS t,
+                       count(), avg(Duration) / 1e6, quantile(0.95)(Duration) / 1e6,
+                       countIf(Duration > {{thresholdSql}}), countIf(StatusCode = '{{ErrorStatus}}')
+                FROM {{TracesTable}}
+                WHERE {{range}} AND {{AnyRootCondition}}
+                GROUP BY t
+                ORDER BY t
+                """;
+            return db.QueryAsync(sql, p, r => new TimeBucketResponse
+            {
+                Time = r.GetDateTime(0),
+                Count = Convert.ToInt64(r.GetValue(1)),
+                AvgMs = Round(r.GetValue(2)),
+                P95Ms = Round(r.GetValue(3)),
+                SlowCount = Convert.ToInt64(r.GetValue(4)),
+                ErrorCount = Convert.ToInt64(r.GetValue(5))
+            }, ct);
+        }
+
+        /// <summary>En son hatalı istekler/çalışmalar (servis ve scheduler birlikte).</summary>
+        public Task<List<RecentErrorResponse>> GetRecentErrorsAsync(DateTimeOffset from, DateTimeOffset to, int limit, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = new() { ["limit"] = (uint)Math.Clamp(limit, 1, 50) };
+            string sql = $$"""
+                SELECT Timestamp, TraceId, ServiceName, SpanName, Duration / 1e6, {{AppKindExpr}},
+                       if(StatusMessage != '', StatusMessage,
+                          if(SpanAttributes['http.response.status_code'] != '', concat('HTTP ', SpanAttributes['http.response.status_code']), 'Hata'))
+                FROM {{TracesTable}}
+                WHERE {{RangeCondition(from, to, p)}} AND {{AnyRootCondition}} AND StatusCode = '{{ErrorStatus}}'
+                ORDER BY Timestamp DESC
+                LIMIT {limit:UInt32}
+                """;
+            return db.QueryAsync(sql, p, r => new RecentErrorResponse
+            {
+                Timestamp = r.GetDateTime(0),
+                TraceId = r.GetString(1),
+                Service = r.GetString(2),
+                Operation = r.GetString(3),
+                DurationMs = Round(r.GetValue(4)),
+                App = Enum.Parse<AppKind>(r.GetString(5)),
+                Error = r.GetString(6)
+            }, ct);
         }
 
         /// <summary>Hatalı istekleri olan operasyonlar için en sık hata (exception mesajı ya da HTTP kodu).</summary>

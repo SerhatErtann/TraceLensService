@@ -48,7 +48,7 @@ namespace TraceLensService.Business
             {
                 DataResponse<List<TimeBucketResponse>> response = new();
                 TraceFilter filter = request.ToFilter(app);
-                int bucket = bucketSeconds ?? AutoBucket(filter.To - filter.From);
+                int bucket = bucketSeconds ?? TimeBuckets.For(filter.To - filter.From);
                 response.Success(await _traceQueries.GetTimeSeriesAsync(filter, bucket));
                 return response;
             }, GeneralConsts.TimeSeriesNotRetrieved);
@@ -80,15 +80,5 @@ namespace TraceLensService.Business
             }, GeneralConsts.TraceNotRetrieved);
 
         #endregion
-
-        /// <summary>Zaman aralığına göre grafik çözünürlüğü (saniye).</summary>
-        private static int AutoBucket(TimeSpan range) => range.TotalMinutes switch
-        {
-            <= 15 => 15,
-            <= 60 => 60,
-            <= 360 => 300,
-            <= 1440 => 900,
-            _ => 3600
-        };
     }
 }
