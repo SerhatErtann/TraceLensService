@@ -24,6 +24,13 @@ namespace TraceLensService.Common
         /// <summary>Alarm kayıtları; TraceLensService açılışta oluşturur (bkz. AlertQueries.EnsureSchemaAsync).</summary>
         public const string AlertsTable = "tracelens_alerts";
         public const int AlertRetentionDays = 90;
+        /// <summary>
+        /// Raporlar için gün × endpoint/job özeti. Ham span'ler 7 gün tutulurken bu özet 90 gün tutulur; materialized view
+        /// (DailyView) otel_traces'e her yazışta doldurur (bkz. ReportQueries.EnsureSchemaAsync).
+        /// </summary>
+        public const string DailyTable = "tracelens_daily";
+        public const string DailyView = "tracelens_daily_mv";
+        public const int DailyRetentionDays = 90;
         /// <summary>Eşikler; dashboard'dan yönetilir. İlk açılışta appsettings "Thresholds" bölümünden doldurulur.</summary>
         public const string ThresholdsTable = "tracelens_thresholds";
 
@@ -123,6 +130,7 @@ namespace TraceLensService.Common
             public const string InstancesNotRetrieved = "Instance listesi alınamadı.";
             public const string ServiceMapNotRetrieved = "Servis haritası alınamadı.";
             public const string LiveNotRetrieved = "Canlı veriler alınamadı.";
+            public const string ReportNotRetrieved = "Rapor alınamadı.";
             public const string InvalidSpanCategory = "Geçersiz tür (method, db veya call olmalı).";
             public const string NotificationNotConfigured = "Bildirim ayarlı değil (Notifications:WebhookUrl).";
             public const string NotificationSent = "Test bildirimi gönderildi.";

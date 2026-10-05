@@ -10,6 +10,7 @@ using TraceLensService.Models.Responses.Analysis;
 using TraceLensService.Models.Responses.Auth;
 using TraceLensService.Models.Responses.Issues;
 using TraceLensService.Models.Responses.Live;
+using TraceLensService.Models.Responses.Reports;
 using TraceLensService.Models.Responses.Overview;
 using TraceLensService.Models.Responses.ServiceDetail;
 using TraceLensService.Models.Responses.Settings;
@@ -106,6 +107,16 @@ namespace TraceLensService.Endpoints
             })
             .WithDescription("Canlı: since'ten sonra gelen istekler (en yeni üstte) ve son 60 saniyenin özeti (app: service | scheduler)")
             .Produces<DataResponse<LiveResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Overview);
+
+            api.MapGet(TraceLensRouteUrls.Reports, async ([FromServices] ReportBusiness business, [FromQuery] string? period,
+                [FromQuery] DateOnly? from, [FromQuery] DateOnly? to) =>
+            {
+                DataResponse<ReportResponse> response = await business.GetReport(period, from, to);
+                return Results.Ok(response);
+            })
+            .WithDescription("Rapor: bugün / dün / son 7 gün / son 30 gün / özel (period: today | yesterday | 7d | 30d | custom + from, to: yyyy-MM-dd), önceki eşit dönemle karşılaştırmalı")
+            .Produces<DataResponse<ReportResponse>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Overview);
 
             #endregion

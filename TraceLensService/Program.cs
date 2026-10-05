@@ -36,6 +36,7 @@ builder.Services.Configure<ThresholdOptions>(builder.Configuration.GetSection(Th
 builder.Services.Configure<AlertOptions>(builder.Configuration.GetSection(AlertOptions.SectionName));
 builder.Services.Configure<NotificationOptions>(builder.Configuration.GetSection(NotificationOptions.SectionName));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
+builder.Services.Configure<ReportOptions>(builder.Configuration.GetSection(ReportOptions.SectionName));
 
 // ---- Giriş (kullanıcı adı + şifre, cookie oturumu) ----
 AuthOptions authOptions = builder.Configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new();
@@ -90,10 +91,12 @@ builder.Services.AddSingleton<ClickHouseContext>();
 builder.Services.AddSingleton<TraceQueries>();
 builder.Services.AddSingleton<AlertQueries>();
 builder.Services.AddSingleton<ThresholdQueries>();
+builder.Services.AddSingleton<ReportQueries>();
 
 // ---- Eşikler (ClickHouse'tan yüklenir, dashboard'dan yönetilir) ----
 builder.Services.AddSingleton<ThresholdStore>();
 builder.Services.AddHostedService<ThresholdSyncWorker>();
+builder.Services.AddHostedService<ReportSchemaWorker>();
 
 // ---- Alarmlar ----
 builder.Services.AddSingleton<ActiveAlertCache>();
@@ -107,6 +110,7 @@ builder.Services.AddScoped<ThresholdBusiness>();
 builder.Services.AddScoped<AuthBusiness>();
 builder.Services.AddScoped<OverviewBusiness>();
 builder.Services.AddScoped<LiveBusiness>();
+builder.Services.AddScoped<ReportBusiness>();
 
 var app = builder.Build();
 

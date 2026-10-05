@@ -31,6 +31,7 @@ namespace TraceLensService.Common
 
         public const string ServiceMap = "service-map";
         public const string Live = "live";
+        public const string Reports = "reports";
 
         public const string TraceDetail = "traces/{traceId}";
 

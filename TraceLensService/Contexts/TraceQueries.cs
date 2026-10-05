@@ -378,9 +378,9 @@ namespace TraceLensService.Contexts
         #region Genel Bakış / Sorunlar (servis ve scheduler birlikte)
 
         // Her iki sayfanın kök span'leri: servislerde gelen HTTP isteği, scheduler'larda job çalıştırması
-        private const string AnyRootCondition =
+        internal const string AnyRootCondition =
             $"((SpanKind = '{ServerSpanKind}' AND ResourceAttributes['{AppTypeAttribute}'] = '{ServiceAppType}') OR SpanAttributes['{JobNameAttribute}'] != '')";
-        private const string AppKindExpr = $"if(SpanAttributes['{JobNameAttribute}'] != '', 'Scheduler', 'Service')";
+        internal const string AppKindExpr = $"if(SpanAttributes['{JobNameAttribute}'] != '', 'Scheduler', 'Service')";
 
         /// <summary>Servis/scheduler başına istek sayısı, ortalama, p95 ve hata sayısı.</summary>
         public Task<List<ServiceStats>> GetServiceStatsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)

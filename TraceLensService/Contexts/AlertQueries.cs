@@ -90,6 +90,18 @@ namespace TraceLensService.Contexts
             },
             Map, ct);
 
+        /// <summary>[from, to) aralığında açık kalmış (o aralıkta açılan ya da hâlâ süren) alarmlar; raporlar için.</summary>
+        public Task<List<AlertRecord>> GetOverlappingAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default) => db.QueryAsync(
+            $$"""
+            SELECT {{Columns}} FROM {{AlertsTable}} FINAL
+            WHERE FiredAt < fromUnixTimestamp64Milli({toMs:Int64}, 'UTC')
+              AND (ResolvedAt IS NULL OR ResolvedAt > fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC'))
+            ORDER BY FiredAt
+            LIMIT 1000
+            """,
+            new Dictionary<string, object> { ["fromMs"] = from.ToUnixTimeMilliseconds(), ["toMs"] = to.ToUnixTimeMilliseconds() },
+            Map, ct);
+
         private static AlertRecord Map(DbDataReader r) => new(
             r.GetGuid(0),
             r.GetString(1),

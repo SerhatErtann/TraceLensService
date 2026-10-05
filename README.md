@@ -152,6 +152,7 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 | `GET api/v1/{service\|scheduler}/outcomes` | Durum kodu (görevlerde başarılı/başarısız) dağılımı ve hata türleri |
 | `GET api/v1/{service\|scheduler}/instances` | Servisin çalışan kopyaları (service.instance.id) ayrı ayrı |
 | `GET api/v1/live?since=&app=&service=&onlySlow=&onlyErrors=` | Canlı: since'ten sonra gelen istekler (en yeni üstte, 30 sn geri bakarak; tekrarlar spanId ile ayıklanır) ve son 60 saniyenin özeti (veri gecikmesi nedeniyle 7 sn geriden) |
+| `GET api/v1/reports?period=today|yesterday|7d|30d|custom&from=&to=` | Rapor: dönem toplamları, gün gün, endpoint/görev bazında önceki dönemle karşılaştırma, alarmlar. Günlük özet tablosundan (tracelens_daily, 90 gün) |
 | `GET api/v1/service-map` | Servis haritası: servisler, görevler, veritabanları ve aralarındaki çağrılar |
 | `GET api/v1/traces/{traceId}` | Waterfall + kök neden ipuçları |
 | `GET api/v1/alerts` | Açık ve kapanan alarmlar |
@@ -162,7 +163,7 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 | `PUT api/v1/thresholds` | `{ service, operation, thresholdMs }` özel eşik ekler/günceller |
 | `DELETE api/v1/thresholds?service=&operation=` | Özel eşiği kaldırır |
 
-Ortak filtreler: `range` (15m, 1h, 24h, 7d) veya `from`/`to`, `service`, `operation`, `minDurationMs`, `onlyErrors`, `onlySlow`.
+Ortak filtreler: `range` (15m, 1h, 6h, 24h, 7d) veya `from`/`to` (ISO tarih-saat; dashboard'da "Özel aralık"), `service`, `operation`, `minDurationMs`, `onlyErrors`, `onlySlow`.
 
 ## Eşikler, alarmlar, bildirimler
 
