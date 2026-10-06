@@ -69,13 +69,21 @@ namespace TraceLensService.Utils
             bool usePercentile = opts.Metric.Equals("p95", StringComparison.OrdinalIgnoreCase);
             string metric = usePercentile ? "p95" : "avg";
 
+            DateTime windowStart = now.AddMinutes(-opts.WindowMinutes);
+            Dictionary<(string, string), string> topStatus = opts.ErrorAlertsEnabled
+                ? await traces.GetTopErrorStatusAsync(windowStart, now, ct)
+                : [];
+
             foreach (AppKind app in Enum.GetValues<AppKind>())
             {
                 List<OperationSummaryResponse> summary = await traces.GetSummaryAsync(
-                    new TraceFilter(app, now.AddMinutes(-opts.WindowMinutes), now), ct);
+                    new TraceFilter(app, windowStart, now), ct);
 
                 foreach (OperationSummaryResponse row in summary.Where(r => r.Count >= opts.MinRequestCount))
                 {
+                    if (opts.ErrorAlertsEnabled)
+                        await CheckErrorsAsync(opts, app, row, topStatus.GetValueOrDefault((row.Service, row.Operation), string.Empty), firing, now, ct);
+
                     double value = usePercentile ? row.P95Ms : row.AvgMs;
                     string key = $"{app}|{row.Service}|{row.Operation}";
 
@@ -102,6 +110,29 @@ namespace TraceLensService.Utils
                 logger.LogInformation("Alarm kapandı: {Service} {Operation} ({Minutes} dk sürdü)",
                     resolved.Service, resolved.Operation, resolved.DurationMinutes);
                 await notifier.NotifyAsync(AlertNotifier.Resolved, resolved, ct);
+            }
+        }
+
+        /// <summary>
+        /// Hata alarmı: pencerede hata oranı sınırı aştıysa (ve tek tük değilse) açılır; açıkken oran sınırın
+        /// ResolveRatio katının altına inince kapanır. Anahtarı yavaşlık alarmından ayrıdır, ikisi aynı anda açık olabilir.
+        /// </summary>
+        private async Task CheckErrorsAsync(AlertOptions opts, AppKind app, OperationSummaryResponse row, string topStatus,
+            HashSet<string> firing, DateTime now, CancellationToken ct)
+        {
+            string key = $"{AlertRecord.ErrorKind}|{app}|{row.Service}|{row.Operation}";
+            bool active = cache.IsActive(key);
+            double limit = active ? opts.ErrorRate * opts.ResolveRatio : opts.ErrorRate;
+            if (row.ErrorRate < limit || (!active && row.ErrorCount < opts.MinErrorCount)) return;
+
+            firing.Add(key);
+            (AlertRecord alert, bool isNew) = cache.UpsertError(key, app, row, topStatus, now);
+            await alerts.SaveAsync(alert, ct);
+            if (isNew)
+            {
+                logger.LogWarning("HATA ALARMI {Service} {Operation}: hata oranı {Rate:P1} ({Errors}/{Count}), en sık {Status}",
+                    row.Service, row.Operation, row.ErrorRate, row.ErrorCount, row.Count, topStatus);
+                await notifier.NotifyAsync(AlertNotifier.Fired, alert, ct);
             }
         }
     }

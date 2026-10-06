@@ -13,9 +13,23 @@ namespace TraceLensService.Contexts
     {
         private const string Columns =
             "Id, Key, App, Service, Operation, Metric, ValueMs, PeakValueMs, ThresholdMs, " +
-            "RequestCount, SlowCount, FiredAt, LastCheckedAt, ResolvedAt";
+            "RequestCount, SlowCount, FiredAt, LastCheckedAt, ResolvedAt, Kind, ErrorCount, ErrorRate, PeakErrorRate, TopStatus";
 
-        public Task EnsureSchemaAsync(CancellationToken ct = default) => db.ExecuteAsync($"""
+        public async Task EnsureSchemaAsync(CancellationToken ct = default)
+        {
+            await CreateTableAsync(ct);
+            // Hata alarmları sonradan eklendi: eski kurulumlarda sütunlar yoksa eklenir, eski alarmlar "slow" sayılır
+            await db.ExecuteAsync($"""
+                ALTER TABLE {AlertsTable}
+                    ADD COLUMN IF NOT EXISTS Kind LowCardinality(String) DEFAULT 'slow',
+                    ADD COLUMN IF NOT EXISTS ErrorCount UInt64 DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS ErrorRate Float64 DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS PeakErrorRate Float64 DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS TopStatus String DEFAULT ''
+                """, null, ct);
+        }
+
+        private Task CreateTableAsync(CancellationToken ct) => db.ExecuteAsync($"""
             CREATE TABLE IF NOT EXISTS {AlertsTable}
             (
                 Id            UUID,
@@ -57,7 +71,12 @@ namespace TraceLensService.Contexts
                 ["firedMs"] = ToUnixMs(a.FiredAt),
                 ["checkedMs"] = ToUnixMs(a.LastCheckedAt),
                 ["resolvedMs"] = a.ResolvedAt is DateTime r ? ToUnixMs(r) : 0L,
-                ["version"] = (ulong)DateTime.UtcNow.Ticks
+                ["version"] = (ulong)DateTime.UtcNow.Ticks,
+                ["kind"] = a.Kind,
+                ["errors"] = (ulong)a.ErrorCount,
+                ["errorRate"] = a.ErrorRate,
+                ["peakErrorRate"] = a.PeakErrorRate,
+                ["topStatus"] = a.TopStatus
             };
 
             return db.ExecuteAsync($$"""
@@ -68,6 +87,7 @@ namespace TraceLensService.Contexts
                        fromUnixTimestamp64Milli({firedMs:Int64}, 'UTC'),
                        fromUnixTimestamp64Milli({checkedMs:Int64}, 'UTC'),
                        if({resolvedMs:Int64} = 0, NULL, fromUnixTimestamp64Milli({resolvedMs:Int64}, 'UTC')),
+                       {kind:String}, {errors:UInt64}, {errorRate:Float64}, {peakErrorRate:Float64}, {topStatus:String},
                        {version:UInt64}
                 """, p, ct);
         }
@@ -76,19 +96,6 @@ namespace TraceLensService.Contexts
             $"SELECT {Columns} FROM {AlertsTable} FINAL WHERE ResolvedAt IS NULL",
             new Dictionary<string, object>(), Map, ct);
 
-        public Task<List<AlertRecord>> GetHistoryAsync(int days, int limit, CancellationToken ct = default) => db.QueryAsync(
-            $$"""
-            SELECT {{Columns}} FROM {{AlertsTable}} FINAL
-            WHERE ResolvedAt IS NOT NULL AND FiredAt > now() - toIntervalDay({days:UInt32})
-            ORDER BY FiredAt DESC
-            LIMIT {limit:UInt32}
-            """,
-            new Dictionary<string, object>
-            {
-                ["days"] = (uint)Math.Clamp(days, 1, AlertRetentionDays),
-                ["limit"] = (uint)Math.Clamp(limit, 1, 1000)
-            },
-            Map, ct);
 
         /// <summary>[from, to) aralığında açık kalmış (o aralıkta açılan ya da hâlâ süren) alarmlar; raporlar için.</summary>
         public Task<List<AlertRecord>> GetOverlappingAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default) => db.QueryAsync(
@@ -116,7 +123,12 @@ namespace TraceLensService.Contexts
             Convert.ToInt64(r.GetValue(10)),
             Utc(r.GetDateTime(11)),
             Utc(r.GetDateTime(12)),
-            r.IsDBNull(13) ? null : Utc(r.GetDateTime(13)));
+            r.IsDBNull(13) ? null : Utc(r.GetDateTime(13)),
+            r.GetString(14),
+            Convert.ToInt64(r.GetValue(15)),
+            r.GetDouble(16),
+            r.GetDouble(17),
+            r.GetString(18));
 
         private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
 

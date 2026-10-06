@@ -136,12 +136,12 @@ namespace TraceLensService.Endpoints
 
             #region Alerts
 
-            api.MapGet(TraceLensRouteUrls.Alerts, async ([FromServices] AlertBusiness business, [FromQuery] int? days) =>
+            api.MapGet(TraceLensRouteUrls.Alerts, async ([FromServices] AlertBusiness business, [AsParameters] AlertFilterRequest request) =>
             {
-                DataResponse<AlertListResponse> response = await business.GetAlerts(days);
+                DataResponse<AlertListResponse> response = await business.GetAlerts(request);
                 return Results.Ok(response);
             })
-            .WithDescription("Açık alarmlar ve son N günün kapanan alarmları")
+            .WithDescription("Açık alarmlar ve aralıkta kapanan alarmlar; filtreler: days veya from/to, app, service, operation, kind (slow | error), minPeakMs, status (500 | 5xx)")
             .Produces<DataResponse<AlertListResponse>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Alerts);
 

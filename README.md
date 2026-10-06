@@ -155,7 +155,7 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 | `GET api/v1/reports?period=today|yesterday|7d|30d|custom&from=&to=` | Rapor: dönem toplamları, gün gün, endpoint/görev bazında önceki dönemle karşılaştırma, alarmlar. Günlük özet tablosundan (tracelens_daily, 90 gün) |
 | `GET api/v1/service-map` | Servis haritası: servisler, görevler, veritabanları ve aralarındaki çağrılar |
 | `GET api/v1/traces/{traceId}` | Waterfall + kök neden ipuçları |
-| `GET api/v1/alerts` | Açık ve kapanan alarmlar |
+| `GET api/v1/alerts` | Açık ve kapanan alarmlar; filtreler: `days` veya `from`/`to`, `app`, `service`, `operation` (içinde geçen), `kind` (slow \| error), `minPeakMs`, `status` (500 \| 5xx) |
 | `POST api/v1/alerts/test-notification` | Webhook'u dener |
 | `GET api/v1/settings` | Eşik ve alarm ayarları |
 | `GET api/v1/thresholds` | Varsayılan eşik + özel eşikler |
@@ -176,12 +176,14 @@ Birden fazla TraceLensService örneği çalışıyorsa bir örnekteki değişikl
 
 ```json
 "Thresholds":    { "DefaultMs": 200, "Overrides": { "order-scheduler|JOB ReportExport": 2000 } },
-"Alerts":        { "WindowMinutes": 5, "MinRequestCount": 5, "Metric": "avg", "ResolveRatio": 0.9 },
+"Alerts":        { "WindowMinutes": 5, "MinRequestCount": 5, "Metric": "avg", "ResolveRatio": 0.9,
+                   "ErrorAlertsEnabled": true, "ErrorRate": 0.05, "MinErrorCount": 3 },
 "Notifications": { "WebhookUrl": "", "Format": "teams", "DashboardUrl": "http://localhost:5180" }
 ```
 
-- Her dakika son 5 dakikaya bakılır; ortalama (veya p95) eşiği aşarsa alarm açılır.
-- Açık alarm, değer eşiğin %90'ının altına inince kapanır (eşik etrafında gidip gelen değerler bildirim yağdırmasın).
+- Her dakika son 5 dakikaya bakılır. İki tür alarm var: **yavaşlık** (ortalama veya p95 eşiği aşarsa) ve **hata** (hata oranı `ErrorRate`'i, yani varsayılan %5'i geçerse ve en az `MinErrorCount` hatalı istek varsa). Hata alarmı en sık hata kodunu (HTTP 500, 502 ya da görevde exception tipi) kaydeder; aynı endpoint için ikisi aynı anda açık olabilir.
+- Alarmlar sayfasında tarih aralığı, servis/görev, uygulama, operasyon, alarm türü, en yüksek süre (ör. ≥ 200 ms) ve hata koduna (500 ya da 5xx) göre filtrelenir.
+- Açık alarm, değer eşiğin (hata alarmında oran sınırının) %90'ının altına inince kapanır (sınır etrafında gidip gelen değerler bildirim yağdırmasın).
 - `Format`: `teams` (Teams Workflows → *"Post to a channel when a webhook request is received"*), `slack` veya `generic`.
 - **WebhookUrl gizlidir**; dosyaya değil ortam değişkenine yazın: `Notifications__WebhookUrl`.
 

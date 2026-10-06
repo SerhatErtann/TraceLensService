@@ -259,7 +259,9 @@ namespace TraceLensService.Business
                 bool errors = row.ErrorCount > 0 && row.ErrorRate >= IssueErrorRate;
                 if (!slow && !errors) continue;
 
-                alarms.TryGetValue($"{app}|{row.Service}|{row.Operation}", out AlertRecord? alarm);
+                // Yavaşlık ya da hata alarmı (anahtarları ayrı); ikisinden hangisi açıksa
+                if (!alarms.TryGetValue($"{app}|{row.Service}|{row.Operation}", out AlertRecord? alarm))
+                    alarms.TryGetValue($"{AlertRecord.ErrorKind}|{app}|{row.Service}|{row.Operation}", out alarm);
                 issues.Add(new IssueResponse
                 {
                     App = app,

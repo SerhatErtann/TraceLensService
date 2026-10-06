@@ -13,7 +13,11 @@ namespace TraceLensService.Utils
     {
         private readonly ConcurrentDictionary<string, AlertRecord> _active = new();
 
-        public List<AlertRecord> Active => _active.Values.OrderByDescending(a => a.ValueMs / a.ThresholdMs).ToList();
+        // Önce hata alarmları (orana göre), sonra yavaşlık (eşiği ne kadar aştığına göre)
+        public List<AlertRecord> Active => _active.Values
+            .OrderByDescending(a => a.Kind == AlertRecord.ErrorKind)
+            .ThenByDescending(a => a.Kind == AlertRecord.ErrorKind ? a.ErrorRate : a.ValueMs / a.ThresholdMs)
+            .ToList();
 
         public bool IsActive(string key) => _active.ContainsKey(key);
 
@@ -45,6 +49,37 @@ namespace TraceLensService.Utils
 
             AlertRecord alert = new(Guid.NewGuid(), key, app, row.Service, row.Operation, metric,
                 value, value, row.ThresholdMs, row.Count, row.SlowCount, now, now);
+            _active[key] = alert;
+            return (alert, true);
+        }
+
+        /// <summary>Hata alarmını açar ya da günceller (hata oranı, en sık sonuç kodu).</summary>
+        public (AlertRecord Alert, bool IsNew) UpsertError(
+            string key, AppKind app, OperationSummaryResponse row, string topStatus, DateTime now)
+        {
+            if (_active.TryGetValue(key, out AlertRecord? existing))
+            {
+                AlertRecord updated = existing with
+                {
+                    ValueMs = row.AvgMs,
+                    PeakValueMs = Math.Max(existing.PeakValueMs, row.AvgMs),
+                    ThresholdMs = row.ThresholdMs,
+                    RequestCount = row.Count,
+                    SlowCount = row.SlowCount,
+                    ErrorCount = row.ErrorCount,
+                    ErrorRate = row.ErrorRate,
+                    PeakErrorRate = Math.Max(existing.PeakErrorRate, row.ErrorRate),
+                    TopStatus = string.IsNullOrEmpty(topStatus) ? existing.TopStatus : topStatus,
+                    LastCheckedAt = now
+                };
+                _active[key] = updated;
+                return (updated, false);
+            }
+
+            AlertRecord alert = new(Guid.NewGuid(), key, app, row.Service, row.Operation, "errors",
+                row.AvgMs, row.AvgMs, row.ThresholdMs, row.Count, row.SlowCount, now, now,
+                Kind: AlertRecord.ErrorKind, ErrorCount: row.ErrorCount, ErrorRate: row.ErrorRate,
+                PeakErrorRate: row.ErrorRate, TopStatus: topStatus);
             _active[key] = alert;
             return (alert, true);
         }

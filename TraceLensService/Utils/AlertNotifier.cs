@@ -54,25 +54,39 @@ namespace TraceLensService.Utils
             }
         }
 
-        private static string BuildTitle(string state, AlertRecord a) => state switch
+        private static string BuildTitle(string state, AlertRecord a) => (state, a.Kind) switch
         {
-            Fired => $"⚠️ {a.Service} · {a.Operation}: {a.Metric} {a.ValueMs:0} ms (eşik {a.ThresholdMs:0} ms)",
-            Resolved => $"✅ {a.Service} · {a.Operation} normale döndü ({a.DurationMinutes:0.#} dk sürdü, en yüksek {a.PeakValueMs:0} ms)",
+            (Fired, AlertRecord.ErrorKind) => $"⚠️ {a.Service} · {a.Operation}: hata oranı %{a.ErrorRate * 100:0.#}" +
+                                              (string.IsNullOrEmpty(a.TopStatus) ? string.Empty : $" (en sık {a.TopStatus})"),
+            (Resolved, AlertRecord.ErrorKind) => $"✅ {a.Service} · {a.Operation} hataları normale döndü ({a.DurationMinutes:0.#} dk sürdü, en yüksek hata oranı %{a.PeakErrorRate * 100:0.#})",
+            (Fired, _) => $"⚠️ {a.Service} · {a.Operation}: {a.Metric} {a.ValueMs:0} ms (eşik {a.ThresholdMs:0} ms)",
+            (Resolved, _) => $"✅ {a.Service} · {a.Operation} normale döndü ({a.DurationMinutes:0.#} dk sürdü, en yüksek {a.PeakValueMs:0} ms)",
             _ => "🔔 TraceLens test bildirimi: webhook çalışıyor"
         };
 
         private object TeamsCard(string state, string title, AlertRecord a, string? link)
         {
+            bool isError = a.Kind == AlertRecord.ErrorKind;
             List<object> facts =
             [
                 new { title = "Servis", value = a.Service },
-                new { title = "Operasyon", value = a.Operation },
-                new { title = a.Metric == "p95" ? "p95" : "Ortalama", value = $"{a.ValueMs:0} ms" },
-                new { title = "Eşik", value = $"{a.ThresholdMs:0} ms" },
-                new { title = "İstek / eşiği aşan", value = $"{a.RequestCount} / {a.SlowCount} (son {alertOptions.CurrentValue.WindowMinutes} dk)" }
+                new { title = "Operasyon", value = a.Operation }
             ];
-            if (state == Resolved)
-                facts.Add(new { title = "Süre", value = $"{a.DurationMinutes:0.#} dk (en yüksek {a.PeakValueMs:0} ms)" });
+            if (isError)
+            {
+                facts.Add(new { title = "Hata oranı", value = $"%{a.ErrorRate * 100:0.#} ({a.ErrorCount} / {a.RequestCount} istek, son {alertOptions.CurrentValue.WindowMinutes} dk)" });
+                if (!string.IsNullOrEmpty(a.TopStatus)) facts.Add(new { title = "En sık hata", value = a.TopStatus });
+                if (state == Resolved)
+                    facts.Add(new { title = "Süre", value = $"{a.DurationMinutes:0.#} dk (en yüksek hata oranı %{a.PeakErrorRate * 100:0.#})" });
+            }
+            else
+            {
+                facts.Add(new { title = a.Metric == "p95" ? "p95" : "Ortalama", value = $"{a.ValueMs:0} ms" });
+                facts.Add(new { title = "Eşik", value = $"{a.ThresholdMs:0} ms" });
+                facts.Add(new { title = "İstek / eşiği aşan", value = $"{a.RequestCount} / {a.SlowCount} (son {alertOptions.CurrentValue.WindowMinutes} dk)" });
+                if (state == Resolved)
+                    facts.Add(new { title = "Süre", value = $"{a.DurationMinutes:0.#} dk (en yüksek {a.PeakValueMs:0} ms)" });
+            }
 
             Dictionary<string, object> card = new()
             {

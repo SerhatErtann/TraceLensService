@@ -19,5 +19,12 @@ namespace TraceLensService.Models.Options
         /// Eşik etrafında gidip gelen değerlerin sürekli aç/kapa bildirimi üretmesini engeller.
         /// </summary>
         public double ResolveRatio { get; set; } = 0.9;
+
+        /// <summary>Hata alarmı: pencere içindeki hata oranı bunu aşarsa açılır (0.05 = %5); kapanışta da ResolveRatio uygulanır.</summary>
+        public bool ErrorAlertsEnabled { get; set; } = true;
+        public double ErrorRate { get; set; } = 0.05;
+
+        /// <summary>Tek tük hata alarm açmasın: pencerede en az bu kadar hatalı istek olmalı.</summary>
+        public int MinErrorCount { get; set; } = 3;
     }
 }

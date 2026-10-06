@@ -547,6 +547,32 @@ namespace TraceLensService.Contexts
             }, ct);
         }
 
+        /// <summary>
+        /// Hata alarmı için operasyon başına en sık hata kodu: HTTP durum kodu ("500"), yoksa exception tipinin
+        /// kısa adı ("IOException"), o da yoksa "Hata".
+        /// </summary>
+        public async Task<Dictionary<(string Service, string Operation), string>> GetTopErrorStatusAsync(
+            DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+        {
+            Dictionary<string, object> p = [];
+            string sql = $$"""
+                SELECT ServiceName, SpanName,
+                       topK(1)(multiIf(SpanAttributes['http.response.status_code'] != '', SpanAttributes['http.response.status_code'],
+                                       ex_type != '', arrayElement(splitByChar('.', ex_type), -1),
+                                       SpanAttributes['error.type'] != '', arrayElement(splitByChar('.', SpanAttributes['error.type']), -1),
+                                       'Hata'))[1]
+                FROM (
+                    SELECT ServiceName, SpanName, SpanAttributes,
+                           arrayFirst(a -> a['exception.type'] != '', `Events.Attributes`)['exception.type'] AS ex_type
+                    FROM {{TracesTable}}
+                    WHERE {{RangeCondition(from, to, p)}} AND {{AnyRootCondition}} AND StatusCode = '{{ErrorStatus}}'
+                )
+                GROUP BY ServiceName, SpanName
+                """;
+            return (await db.QueryAsync(sql, p, r => (r.GetString(0), r.GetString(1), r.GetString(2)), ct))
+                .ToDictionary(x => (x.Item1, x.Item2), x => x.Item3);
+        }
+
         /// <summary>Hatalı istekleri olan operasyonlar için en sık hata (exception mesajı ya da HTTP kodu).</summary>
         public async Task<Dictionary<(string Service, string Operation), string>> GetTopErrorsAsync(
             DateTimeOffset from, DateTimeOffset to, string? service, CancellationToken ct = default)
