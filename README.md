@@ -27,14 +27,14 @@ tracelens-service/
 ├─ nuget.config                  Paket kaynakları (CommonUtils Finoku feed'inde)
 ├─ otel-collector/               Collector ayarı (otel-collector.yaml) ve Dockerfile
 ├─ TraceLensService/             API (+ Dockerfile)
-│   ├─ Business/                 TraceBusiness, AlertBusiness (Guard → DataResponse)
+│   ├─ Business/                 TraceBusiness, AlertBusiness, AssistantBusiness (Guard → DataResponse)
 │   ├─ Common/                   GlobalConsts, TraceLensRouteUrls
 │   ├─ Config/                   appsettings.json
 │   ├─ Contexts/                 ClickHouseContext + sorgular (TraceQueries, AlertQueries)
 │   ├─ Endpoints/                TraceLensEndpoints : IEndpoint
 │   ├─ Enums/
 │   ├─ Models/                   Requests, Responses, DbModels, Options, Internal
-│   └─ Utils/                    TraceAnalyzer, AlertWorker, AlertNotifier, ActiveAlertCache
+│   └─ Utils/                    TraceAnalyzer, AlertWorker, AlertNotifier, ActiveAlertCache, AssistantTools (AI araçları)
 └─ Samples/                      Test verisi üreten demo servisler; aynı zamanda "servisi bağlama" rehberinin örneği
     ├─ Sample.OrderService       (5101)  → PaymentService'i çağırır, bilerek N+1 sorgu ve yavaş metod içerir
     ├─ Sample.PaymentService     (5102)  değişken gecikme, ara sıra 502
@@ -162,6 +162,8 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 | `PUT api/v1/thresholds/default` | `{ thresholdMs }` varsayılan eşiği değiştirir |
 | `PUT api/v1/thresholds` | `{ service, operation, thresholdMs }` özel eşik ekler/günceller |
 | `DELETE api/v1/thresholds?service=&operation=` | Özel eşiği kaldırır |
+| `GET api/v1/assistant/status` | AI asistanı açık mı (API anahtarı tanımlı mı), hangi model |
+| `POST api/v1/assistant/chat` | `{ messages: [{ role, content }] }` → `{ answer, steps, model }` (bkz. "AI asistanı") |
 
 Ortak filtreler: `range` (15m, 1h, 6h, 24h, 7d) veya `from`/`to` (ISO tarih-saat; dashboard'da "Özel aralık"), `service`, `operation`, `minDurationMs`, `onlyErrors`, `onlySlow`.
 
@@ -186,6 +188,17 @@ Birden fazla TraceLensService örneği çalışıyorsa bir örnekteki değişikl
 - Açık alarm, değer eşiğin (hata alarmında oran sınırının) %90'ının altına inince kapanır (sınır etrafında gidip gelen değerler bildirim yağdırmasın).
 - `Format`: `teams` (Teams Workflows → *"Post to a channel when a webhook request is received"*), `slack` veya `generic`.
 - **WebhookUrl gizlidir**; dosyaya değil ortam değişkenine yazın: `Notifications__WebhookUrl`.
+
+## AI asistanı
+
+Dashboard'un sağ altındaki gözlü buton. Türkçe soru sorulur ("Bugün hata veren servisler hangileri?", "Dünle bugünü karşılaştır"); cevap Claude API ile üretilir.
+
+- **Nasıl çalışır:** `AssistantBusiness` soruyu Claude'a gönderir. Claude veriye `Utils/AssistantTools.cs`'teki araçlarla bakar: genel bakış, sorunlar, endpoint listesi, servis dağılımı, hata türleri, en yavaş istekler, alarmlar, rapor, tek trace. Araçlar dashboard'un kullandığı business metodlarını çağırır, yani sayılar dashboard ile aynıdır. Cevaptaki linkler dashboard sayfalarını açar.
+- **Açmak için:** API anahtarını ortam değişkenine yazın: `ANTHROPIC_API_KEY` (veya `Ai__ApiKey`). Docker'da `.env` → `ANTHROPIC_API_KEY`. Dosyaya yazmayın. Anahtar yoksa buton görünür ama asistan "kapalı" der.
+- **Ayarlar** (`Ai`): `Model` (varsayılan `claude-opus-5-5`), `MaxToolRounds` (bir soruda en fazla araç turu, 8), `QuestionsPerMinute` (IP başına dakikada soru, 10; fazlası 429).
+- **Gizlilik:** soru ve araçların döndürdüğü özet veri (servis/endpoint adları, süreler, hata mesajları) Anthropic'e gönderilir. Sohbet sunucuda saklanmaz; tarayıcı sekmesinde tutulur.
+- Claude'un güvenlik filtresi bir isteği reddederse aynı çağrı içinde yedek modele düşülür (server-side fallback beta).
+- Geliştirme ortamında (`ASPNETCORE_ENVIRONMENT=Development`) araçların Claude'a ne döndürdüğü API anahtarı olmadan görülebilir: `GET api/v1/assistant/tools/get_overview?input={"range":"1h"}`.
 
 ## Bir servisi TraceLens'e bağlamak
 

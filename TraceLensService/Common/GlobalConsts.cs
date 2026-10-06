@@ -10,6 +10,9 @@ namespace TraceLensService.Common
         // --- Giriş ---
         public const string AuthCookieName = "tracelens.auth";
         public const string LoginRateLimitPolicy = "login";
+        /// <summary>AI asistanı: soru başına API maliyeti olduğu için IP başına dakikalık sınır (Ai:QuestionsPerMinute).</summary>
+        public const string AssistantRateLimitPolicy = "assistant";
+        public const string AssistantPathPrefix = "api/v1/assistant";
         /// <summary>Aynı IP'den dakikada izin verilen giriş denemesi.</summary>
         public const int LoginAttemptsPerMinute = 5;
 
@@ -131,6 +134,16 @@ namespace TraceLensService.Common
             public const string ServiceMapNotRetrieved = "Servis haritası alınamadı.";
             public const string LiveNotRetrieved = "Canlı veriler alınamadı.";
             public const string ReportNotRetrieved = "Rapor alınamadı.";
+            public const string AssistantFailed = "Asistan şu an cevap veremedi.";
+            public const string AssistantDisabled = "AI asistanı kapalı: TraceLensService'te ANTHROPIC_API_KEY (ya da Ai__ApiKey) ortam değişkeni tanımlı değil.";
+            public const string AssistantEmptyQuestion = "Bir soru yazın.";
+            public const string AssistantBadKey = "Claude API anahtarı geçersiz ya da yetkisiz.";
+            public const string AssistantBusy = "Claude API şu an yoğun ya da kota doldu; biraz sonra tekrar deneyin.";
+            public const string AssistantUnavailable = "Claude API şu an yanıt vermiyor; biraz sonra tekrar deneyin.";
+            public const string AssistantRefused = "Bu soruya cevap veremiyorum. TraceLens verisiyle ilgili başka bir şey sorabilirsiniz.";
+            public const string AssistantNoAnswer = "Cevap üretilemedi; soruyu farklı sorabilir misiniz?";
+            public const string AssistantTooManySteps = "Soru çok fazla adım gerektirdi; daha dar bir soru deneyin (ör. tek bir servis ya da zaman aralığı).";
+            public const string TooManyQuestions = "Çok sık soru soruldu. Bir dakika sonra tekrar deneyin.";
             public const string InvalidSpanCategory = "Geçersiz tür (method, db veya call olmalı).";
             public const string NotificationNotConfigured = "Bildirim ayarlı değil (Notifications:WebhookUrl).";
             public const string NotificationSent = "Test bildirimi gönderildi.";
@@ -158,6 +171,7 @@ namespace TraceLensService.Common
             public const string Traces = "Traces";
             public const string Alerts = "Alerts";
             public const string Settings = "Settings";
+            public const string Assistant = "Assistant";
         }
     }
 }

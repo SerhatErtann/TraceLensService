@@ -61,6 +61,8 @@ services:
       Auth__Username: ${AUTH_USERNAME:-admin}
       Auth__Password: ${AUTH_PASSWORD:-}
       Auth__Required: "true"
+      # AI asistanı (Claude API anahtarı). Boşsa asistan kapalı görünür
+      Ai__ApiKey: ${ANTHROPIC_API_KEY:-}
     depends_on:
       clickhouse:
         condition: service_healthy

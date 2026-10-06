@@ -6,6 +6,8 @@ using TraceLensService.Common;
 using TraceLensService.Enums;
 using TraceLensService.Models.Requests;
 using TraceLensService.Models.Responses.Alerts;
+using TraceLensService.Models.Responses.Assistant;
+using TraceLensService.Models.Responses.Assistant;
 using TraceLensService.Models.Responses.Analysis;
 using TraceLensService.Models.Responses.Auth;
 using TraceLensService.Models.Responses.Issues;
@@ -131,6 +133,30 @@ namespace TraceLensService.Endpoints
             .WithDescription("Trace waterfall'ı, self-time ve kök neden ipuçları")
             .Produces<DataResponse<TraceDetailResponse>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Traces);
+
+            #endregion
+
+            #region Assistant
+
+            api.MapGet(TraceLensRouteUrls.AssistantStatus, async ([FromServices] AssistantBusiness business) =>
+            {
+                DataResponse<AssistantStatusResponse> response = await business.GetStatus();
+                return Results.Ok(response);
+            })
+            .WithDescription("AI asistanı açık mı (Claude API anahtarı tanımlı mı) ve hangi model")
+            .Produces<DataResponse<AssistantStatusResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Assistant);
+
+            api.MapPost(TraceLensRouteUrls.AssistantChat, async ([FromServices] AssistantBusiness business, [FromBody] AssistantRequest request,
+                CancellationToken ct) =>
+            {
+                DataResponse<AssistantResponse> response = await business.Ask(request, ct);
+                return Results.Ok(response);
+            })
+            .RequireRateLimiting(AssistantRateLimitPolicy)
+            .WithDescription("Soruyu Claude'a sorar; Claude TraceLens verisini araçlarla okuyup Türkçe cevaplar (sohbet istemcide tutulur)")
+            .Produces<DataResponse<AssistantResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Assistant);
 
             #endregion
 

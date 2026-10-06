@@ -37,6 +37,7 @@ builder.Services.Configure<AlertOptions>(builder.Configuration.GetSection(AlertO
 builder.Services.Configure<NotificationOptions>(builder.Configuration.GetSection(NotificationOptions.SectionName));
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
 builder.Services.Configure<ReportOptions>(builder.Configuration.GetSection(ReportOptions.SectionName));
+builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
 
 // ---- Giriş (kullanıcı adı + şifre, cookie oturumu) ----
 AuthOptions authOptions = builder.Configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new();
@@ -64,12 +65,19 @@ builder.Services.AddAuthorization(o =>
     if (authOptions.Enabled)
         o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
 });
+AiOptions aiOptions = builder.Configuration.GetSection(AiOptions.SectionName).Get<AiOptions>() ?? new();
 builder.Services.AddRateLimiter(o =>
 {
     o.AddPolicy(GlobalConsts.LoginRateLimitPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
         ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = GlobalConsts.LoginAttemptsPerMinute, Window = TimeSpan.FromMinutes(1) }));
-    o.OnRejected = (ctx, _) => new ValueTask(WriteFailure(ctx.HttpContext.Response, StatusCodes.Status429TooManyRequests, GlobalConsts.GeneralConsts.TooManyLoginAttempts));
+    o.AddPolicy(GlobalConsts.AssistantRateLimitPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = Math.Max(1, aiOptions.QuestionsPerMinute), Window = TimeSpan.FromMinutes(1) }));
+    o.OnRejected = (ctx, _) => new ValueTask(WriteFailure(ctx.HttpContext.Response, StatusCodes.Status429TooManyRequests,
+        ctx.HttpContext.Request.Path.StartsWithSegments("/" + GlobalConsts.AssistantPathPrefix)
+            ? GlobalConsts.GeneralConsts.TooManyQuestions
+            : GlobalConsts.GeneralConsts.TooManyLoginAttempts));
 });
 // nginx arkasında gerçek istemci IP'si (deneme sınırı IP bazlı). Servis yalnızca Docker ağından erişilebilir.
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
@@ -111,6 +119,8 @@ builder.Services.AddScoped<AuthBusiness>();
 builder.Services.AddScoped<OverviewBusiness>();
 builder.Services.AddScoped<LiveBusiness>();
 builder.Services.AddScoped<ReportBusiness>();
+builder.Services.AddScoped<AssistantTools>();
+builder.Services.AddScoped<AssistantBusiness>();
 
 var app = builder.Build();
 
@@ -131,6 +141,19 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapEndpoints();
+
+// Sadece geliştirme: asistan aracının Claude'a ne döndüğünü API anahtarı olmadan görmek için
+// GET /api/v1/assistant/tools/get_overview?input={"range":"1h"}
+if (app.Environment.IsDevelopment())
+{
+    app.MapGet("/" + GlobalConsts.AssistantPathPrefix + "/tools/{name}", async (string name, string? input, AssistantTools tools) =>
+    {
+        Dictionary<string, System.Text.Json.JsonElement> args =
+            System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(input ?? "{}") ?? [];
+        (string content, bool isError) = await tools.ExecuteAsync(name, args);
+        return Results.Text(content, isError ? "text/plain" : "application/json");
+    }).ExcludeFromDescription();
+}
 // Container/yük dengeleyici sağlık kontrolü için
 app.MapGet(GlobalConsts.HealthUrl, () => Results.Ok("ok")).AllowAnonymous().ExcludeFromDescription();
 app.Run();

@@ -33,6 +33,10 @@ namespace TraceLensService.Common
         public const string Live = "live";
         public const string Reports = "reports";
 
+        // AI asistanı (Claude API)
+        public const string AssistantStatus = "assistant/status";
+        public const string AssistantChat = "assistant/chat";
+
         public const string TraceDetail = "traces/{traceId}";
 
         // Genel Bakış ve Sorunlar: servis + scheduler birlikte
