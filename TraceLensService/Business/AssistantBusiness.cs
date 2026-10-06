@@ -25,7 +25,6 @@ namespace TraceLensService.Business
 
         private readonly IOptionsMonitor<AiOptions> _options = serviceProvider.GetRequiredService<IOptionsMonitor<AiOptions>>();
         private readonly AssistantTools _tools = serviceProvider.GetRequiredService<AssistantTools>();
-        private readonly ILogger<AssistantBusiness> _logger = serviceProvider.GetRequiredService<ILogger<AssistantBusiness>>();
 
         // Sabit kalır (önbelleğe alınabilsin diye tarih/saat gibi değişen bilgi buraya değil, soruya eklenir)
         private const string SystemPrompt = """

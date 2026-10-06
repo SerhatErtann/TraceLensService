@@ -30,11 +30,11 @@ tracelens-service/
 │   ├─ Business/                 TraceBusiness, AlertBusiness, AssistantBusiness (Guard → DataResponse)
 │   ├─ Common/                   GlobalConsts, TraceLensRouteUrls
 │   ├─ Config/                   appsettings.json
-│   ├─ Contexts/                 ClickHouseContext + sorgular (TraceQueries, AlertQueries)
+│   ├─ Contexts/                 ClickHouseContext + sorgular (TraceQueries, AlertQueries, UserQueries)
 │   ├─ Endpoints/                TraceLensEndpoints : IEndpoint
 │   ├─ Enums/
 │   ├─ Models/                   Requests, Responses, DbModels, Options, Internal
-│   └─ Utils/                    TraceAnalyzer, AlertWorker, AlertNotifier, ActiveAlertCache, AssistantTools (AI araçları)
+│   └─ Utils/                    TraceAnalyzer, AlertWorker, AlertNotifier, ActiveAlertCache, AssistantTools (AI araçları), UserStore + PasswordHasher (kullanıcılar)
 └─ Samples/                      Test verisi üreten demo servisler; aynı zamanda "servisi bağlama" rehberinin örneği
     ├─ Sample.OrderService       (5101)  → PaymentService'i çağırır, bilerek N+1 sorgu ve yavaş metod içerir
     ├─ Sample.PaymentService     (5102)  değişken gecikme, ara sıra 502
@@ -64,7 +64,7 @@ Sunucuda Docker ve Docker Compose yeterli; .NET veya Node kurmaya gerek yok.
    git clone https://github.com/SerhatErtann/TraceLensFrontend.git tracelens-frontend
    ```
 2. `tracelens-service` içinde `.env.example`'ı `.env` olarak kopyalayın ve doldurun. En az şunlar:
-   - `AUTH_PASSWORD`: dashboard giriş şifresi (**zorunlu**; boşsa API açılmaz). Kullanıcı adı `AUTH_USERNAME`, varsayılan `admin`
+   - `AUTH_PASSWORD`: ilk hesabın şifresi (kullanıcı adı `AUTH_USERNAME`, varsayılan `admin`). Verilmezse ilk hesabı dashboard'ı ilk açan kişi oluşturur; sunucuda bu yüzden vermeniz önerilir
    - `CLICKHOUSE_PASSWORD`: güçlü bir şifre
    - `DASHBOARD_URL`: dashboard'un dışarıdan erişilen adresi (bildirimlerdeki link için)
    - `NOTIFICATIONS_WEBHOOK_URL`: Teams/Slack bildirimi isteniyorsa
@@ -89,18 +89,22 @@ Güncellemek için: `git pull` (iki repoda da) → `docker compose --profile app
 - Şifrede `;` karakteri kullanmayın (bağlantı cümlesinde ayraçtır).
 - **Alarm kontrolünü yalnızca bir TraceLensService örneği yapmalı.** Aynı veritabanına bağlı ikinci bir örnek (ör. sunucudaki container + yerelde Visual Studio'daki) çalışıyorsa, ikincisinde `Alerts__Enabled=false` verin; yoksa aynı alarm için iki bildirim gider.
 
-## Dashboard girişi
+## Dashboard girişi ve kullanıcılar
 
-Tek kullanıcılı, kullanıcı adı + şifre ile giriş. Kullanıcı adı ve şifre ortam değişkeninden okunur (`Auth__Username`, `Auth__Password`; Docker'da `.env` → `AUTH_USERNAME`, `AUTH_PASSWORD`).
+Giriş her zaman açıktır; kullanıcılar ClickHouse'taki `tracelens_users` tablosunda tutulur. Şifreler düz değil, **PBKDF2-SHA256** (600.000 tur, kullanıcıya özel tuz) özeti olarak saklanır.
 
-| Durum | Davranış |
+| Durum | Giriş sayfası |
 |---|---|
-| Şifre tanımlı | Dashboard giriş ekranı açar; `auth/login`, `auth/logout`, `auth/me` ve `/health` dışındaki tüm API uçları oturum ister (yoksa 401) |
-| Şifre tanımlı değil (yerel geliştirme) | Giriş kapalı, herkes erişir; açılışta uyarı loglanır |
-| `Auth__Required=true` ve şifre yok | API **açılmaz** (docker-compose'da açık; sunucuda yanlışlıkla korumasız yayını engeller) |
+| Hiç hesap yok | "İlk hesabı oluşturun" ekranı açılır; ilk hesabı oluşturan doğrudan girer |
+| Hesap var, `Auth:AllowRegistration=true` (yerel varsayılan) | Giriş + "Kayıt olun" seçeneği; herkes kendine hesap açabilir |
+| Hesap var, `Auth:AllowRegistration=false` (Docker varsayılanı) | Sadece giriş; yeni kişiyi hesabı olan biri **Ayarlar → Kullanıcılar**'dan ekler |
 
+- Sunucu kurulumu: `.env`'de `AUTH_PASSWORD` verilirse hiç hesap yokken ilk hesap (`AUTH_USERNAME`, varsayılan `admin`) bundan oluşturulur; böylece "ilk hesabı oluştur" ekranı internete açık kalmaz. Hesap oluştuktan sonra bu değişkenin etkisi yoktur.
+- Ayarlar sayfasında: kullanıcı listesi, kullanıcı ekleme/silme (kendi hesabınızı silemezsiniz), kendi şifrenizi değiştirme.
+- Kullanıcı silinince ya da şifre değişince o hesabın diğer cihazlardaki oturumları hemen düşer.
+- `auth/login`, `auth/register`, `auth/logout`, `auth/me` ve `/health` dışındaki tüm API uçları oturum ister (yoksa 401).
 - Oturum cookie'si `HttpOnly` ve `SameSite=Strict`; 8 saat kullanılmazsa düşer.
-- Aynı IP'den dakikada en fazla 5 giriş denemesi (başarılılar dahil); fazlası 429 döner.
+- Aynı IP'den dakikada en fazla 5 giriş/kayıt/şifre değiştirme denemesi (başarılılar dahil); fazlası 429 döner.
 - Container yeniden başlayınca oturumlar düşer, yeniden giriş gerekir.
 
 ## ClickHouse'taki verilere bakmak
@@ -137,7 +141,9 @@ Tüm yanıtlar `DataResponse<T>` formatındadır: `{ isSuccess, message, message
 
 | Uç | Açıklama |
 |---|---|
-| `POST api/v1/auth/login` · `POST api/v1/auth/logout` · `GET api/v1/auth/me` | Giriş (bkz. "Dashboard girişi") |
+| `POST api/v1/auth/login` · `POST api/v1/auth/register` · `POST api/v1/auth/logout` · `GET api/v1/auth/me` | Giriş ve kayıt (bkz. "Dashboard girişi ve kullanıcılar") |
+| `PUT api/v1/auth/password` | `{ currentPassword, newPassword }` kendi şifresini değiştirir |
+| `GET api/v1/users` · `POST api/v1/users` · `DELETE api/v1/users/{username}` | Kullanıcı listesi, ekleme (`{ username, password }`), silme |
 | `GET api/v1/overview` | Genel Bakış: tüm servis/scheduler özetleri, kart grafikleri (24 nokta), açık sorun ve alarm sayısı, önceki dönem toplamları ve grafiği |
 | `GET api/v1/issues` | Sorunlar: ortalaması eşiği aşan veya hata oranı %5'i geçen endpoint/job'lar, en sık hata ve alarm bilgisiyle (`service` ile filtrelenebilir) |
 | `GET api/v1/{service\|scheduler}/services` | Filtre listesi |

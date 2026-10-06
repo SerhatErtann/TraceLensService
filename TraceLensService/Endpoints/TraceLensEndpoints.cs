@@ -7,7 +7,6 @@ using TraceLensService.Enums;
 using TraceLensService.Models.Requests;
 using TraceLensService.Models.Responses.Alerts;
 using TraceLensService.Models.Responses.Assistant;
-using TraceLensService.Models.Responses.Assistant;
 using TraceLensService.Models.Responses.Analysis;
 using TraceLensService.Models.Responses.Auth;
 using TraceLensService.Models.Responses.Issues;
@@ -39,7 +38,7 @@ namespace TraceLensService.Endpoints
 
             #region Auth
 
-            // Diğer tüm uçlar Program.cs'teki varsayılan politika ile oturum ister; bu üçü herkese açık.
+            // Diğer tüm uçlar Program.cs'teki varsayılan politika ile oturum ister; login/register/logout/me herkese açık.
             api.MapPost(TraceLensRouteUrls.AuthLogin, async ([FromServices] AuthBusiness business, [FromBody] LoginRequest request) =>
             {
                 DataResponse<AuthStatusResponse> response = await business.Login(request);
@@ -49,6 +48,54 @@ namespace TraceLensService.Endpoints
             .RequireRateLimiting(LoginRateLimitPolicy)
             .WithDescription("Kullanıcı adı + şifre ile oturum açar (cookie)")
             .Produces<DataResponse<AuthStatusResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Auth);
+
+            api.MapPost(TraceLensRouteUrls.AuthRegister, async ([FromServices] AuthBusiness business, [FromBody] LoginRequest request) =>
+            {
+                DataResponse<AuthStatusResponse> response = await business.Register(request);
+                return Results.Ok(response);
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting(LoginRateLimitPolicy)
+            .WithDescription("Hesap oluşturur ve oturum açar. İlk hesap her zaman; sonrakiler yalnızca Auth:AllowRegistration açıksa")
+            .Produces<DataResponse<AuthStatusResponse>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Auth);
+
+            api.MapPut(TraceLensRouteUrls.AuthPassword, async ([FromServices] AuthBusiness business, [FromBody] ChangePasswordRequest request) =>
+            {
+                BaseResponse response = await business.ChangePassword(request);
+                return Results.Ok(response);
+            })
+            .RequireRateLimiting(LoginRateLimitPolicy)
+            .WithDescription("Kendi şifresini değiştirir; diğer cihazlardaki oturumlar kapanır")
+            .Produces<BaseResponse>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Auth);
+
+            api.MapGet(TraceLensRouteUrls.Users, async ([FromServices] AuthBusiness business) =>
+            {
+                DataResponse<List<UserResponse>> response = await business.GetUsers();
+                return Results.Ok(response);
+            })
+            .WithDescription("Dashboard kullanıcıları")
+            .Produces<DataResponse<List<UserResponse>>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Auth);
+
+            api.MapPost(TraceLensRouteUrls.Users, async ([FromServices] AuthBusiness business, [FromBody] LoginRequest request) =>
+            {
+                DataResponse<List<UserResponse>> response = await business.AddUser(request);
+                return Results.Ok(response);
+            })
+            .WithDescription("Başka biri için hesap açar")
+            .Produces<DataResponse<List<UserResponse>>>(StatusCodes.Status200OK)
+            .WithTags(GeneralConsts.Auth);
+
+            api.MapDelete(TraceLensRouteUrls.UserByName, async ([FromServices] AuthBusiness business, string username) =>
+            {
+                DataResponse<List<UserResponse>> response = await business.DeleteUser(username);
+                return Results.Ok(response);
+            })
+            .WithDescription("Kullanıcıyı siler (kendi hesabınız silinemez); oturumu da kapanır")
+            .Produces<DataResponse<List<UserResponse>>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Auth);
 
             api.MapPost(TraceLensRouteUrls.AuthLogout, async ([FromServices] AuthBusiness business) =>
@@ -67,7 +114,7 @@ namespace TraceLensService.Endpoints
                 return Results.Ok(response);
             })
             .AllowAnonymous()
-            .WithDescription("Giriş açık mı ve oturum var mı")
+            .WithDescription("Oturum var mı, ilk hesap oluşturulmalı mı, kayıt açık mı")
             .Produces<DataResponse<AuthStatusResponse>>(StatusCodes.Status200OK)
             .WithTags(GeneralConsts.Auth);
 

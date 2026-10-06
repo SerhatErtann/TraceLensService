@@ -36,6 +36,13 @@ namespace TraceLensService.Common
         public const int DailyRetentionDays = 90;
         /// <summary>Eşikler; dashboard'dan yönetilir. İlk açılışta appsettings "Thresholds" bölümünden doldurulur.</summary>
         public const string ThresholdsTable = "tracelens_thresholds";
+        /// <summary>Dashboard kullanıcıları (şifre özetiyle); bkz. UserQueries, UserStore.</summary>
+        public const string UsersTable = "tracelens_users";
+        public const int UserCacheSeconds = 30;
+        /// <summary>Oturum cookie'sindeki şifre izi; şifre değişince eski oturumlar düşer.</summary>
+        public const string PasswordStampClaim = "tl_pwd";
+        public const int MinPasswordLength = 8;
+        public const int MaxPasswordLength = 128;
 
         // --- Eşik kuralları ---
         /// <summary>Varsayılan eşik satırının anahtarı (servis/operasyon boş).</summary>
@@ -157,10 +164,20 @@ namespace TraceLensService.Common
             public const string ThresholdDeleted = "Özel eşik kaldırıldı; varsayılan eşik geçerli.";
             public const string InvalidCredentials = "Kullanıcı adı veya şifre hatalı.";
             public const string LoginFailed = "Giriş yapılamadı.";
-            public const string AuthDisabled = "Giriş kapalı (Auth:Password tanımlı değil).";
             public const string LoginRequired = "Oturum açmanız gerekiyor.";
             public const string TooManyLoginAttempts = "Çok fazla deneme yapıldı. Bir dakika sonra tekrar deneyin.";
-            public const string AuthPasswordMissing = "Auth:Required=true ama Auth:Password tanımlı değil. Şifreyi ortam değişkeniyle verin (Auth__Password / .env AUTH_PASSWORD).";
+            public const string RegisterFailed = "Hesap oluşturulamadı.";
+            public const string RegistrationClosed = "Kayıt kapalı. Hesabı olan biri sizi Ayarlar > Kullanıcılar'dan ekleyebilir.";
+            public const string UsernameInvalid = "Kullanıcı adı 3-32 karakter olmalı; harf, rakam, nokta, alt çizgi ve tire kullanılabilir.";
+            public const string PasswordInvalid = "Şifre en az 8, en fazla 128 karakter olmalı.";
+            public const string UsernameTaken = "Bu kullanıcı adı alınmış.";
+            public const string UsersNotRetrieved = "Kullanıcılar alınamadı.";
+            public const string UserNotSaved = "Kullanıcı eklenemedi.";
+            public const string UserNotDeleted = "Kullanıcı silinemedi.";
+            public const string UserNotFound = "Kullanıcı bulunamadı.";
+            public const string CannotDeleteSelf = "Kendi hesabınızı silemezsiniz.";
+            public const string PasswordNotChanged = "Şifre değiştirilemedi.";
+            public const string CurrentPasswordWrong = "Mevcut şifre hatalı.";
 
             // Swagger etiketleri
             public const string Auth = "Auth";

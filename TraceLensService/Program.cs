@@ -1,6 +1,7 @@
 using CommonUtils.Extensions;
 using CommonUtils.Interfaces;
 using CommonUtils.Models;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -11,6 +12,7 @@ using TraceLensService.Business;
 using TraceLensService.Common;
 using TraceLensService.Contexts;
 using TraceLensService.Endpoints;
+using TraceLensService.Models.DbModels;
 using TraceLensService.Models.Options;
 using TraceLensService.Utils;
 
@@ -39,10 +41,8 @@ builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOpt
 builder.Services.Configure<ReportOptions>(builder.Configuration.GetSection(ReportOptions.SectionName));
 builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
 
-// ---- Giriş (kullanıcı adı + şifre, cookie oturumu) ----
+// ---- Giriş (kullanıcılar tracelens_users tablosunda, cookie oturumu) ----
 AuthOptions authOptions = builder.Configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new();
-if (authOptions.Required && !authOptions.Enabled)
-    throw new InvalidOperationException(GlobalConsts.GeneralConsts.AuthPasswordMissing);
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -58,13 +58,28 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         // API: oturum yoksa login sayfasına yönlendirmek yerine 401 dön; dashboard giriş ekranını kendisi açar
         o.Events.OnRedirectToLogin = ctx => WriteFailure(ctx.Response, StatusCodes.Status401Unauthorized, GlobalConsts.GeneralConsts.LoginRequired);
         o.Events.OnRedirectToAccessDenied = ctx => WriteFailure(ctx.Response, StatusCodes.Status403Forbidden, GlobalConsts.GeneralConsts.LoginRequired);
+        // Silinen kullanıcının ya da şifresi değişen hesabın eski oturumları hemen düşer
+        o.Events.OnValidatePrincipal = async ctx =>
+        {
+            UserStore users = ctx.HttpContext.RequestServices.GetRequiredService<UserStore>();
+            UserRecord? user;
+            try
+            {
+                user = await users.FindAsync(ctx.Principal?.Identity?.Name, ctx.HttpContext.RequestAborted);
+            }
+            catch (Exception)
+            {
+                return; // ClickHouse geçici olarak erişilemiyorsa oturum düşürülmez
+            }
+            if (user is null || ctx.Principal?.FindFirst(GlobalConsts.PasswordStampClaim)?.Value != PasswordHasher.Stamp(user.PasswordHash))
+            {
+                ctx.RejectPrincipal();
+                await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            }
+        };
     });
-builder.Services.AddAuthorization(o =>
-{
-    // Şifre tanımlıysa AllowAnonymous olmayan her uç oturum ister
-    if (authOptions.Enabled)
-        o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
-});
+// login/register/logout/me (AllowAnonymous) dışındaki her uç oturum ister
+builder.Services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 AiOptions aiOptions = builder.Configuration.GetSection(AiOptions.SectionName).Get<AiOptions>() ?? new();
 builder.Services.AddRateLimiter(o =>
 {
@@ -100,6 +115,8 @@ builder.Services.AddSingleton<TraceQueries>();
 builder.Services.AddSingleton<AlertQueries>();
 builder.Services.AddSingleton<ThresholdQueries>();
 builder.Services.AddSingleton<ReportQueries>();
+builder.Services.AddSingleton<UserQueries>();
+builder.Services.AddSingleton<UserStore>();
 
 // ---- Eşikler (ClickHouse'tan yüklenir, dashboard'dan yönetilir) ----
 builder.Services.AddSingleton<ThresholdStore>();
@@ -123,9 +140,6 @@ builder.Services.AddScoped<AssistantTools>();
 builder.Services.AddScoped<AssistantBusiness>();
 
 var app = builder.Build();
-
-if (!authOptions.Enabled)
-    app.Logger.LogWarning("Dashboard girişi KAPALI (Auth:Password tanımlı değil). Sunucuda mutlaka şifre verin.");
 
 app.UseForwardedHeaders();
 

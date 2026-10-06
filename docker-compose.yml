@@ -57,10 +57,11 @@ services:
       Notifications__Format: ${NOTIFICATIONS_FORMAT:-teams}
       Notifications__DashboardUrl: ${DASHBOARD_URL:-http://localhost:8080}
       Swagger__IsEnabled: "false"
-      # Dashboard girişi. Required=true: AUTH_PASSWORD boşsa servis açılmaz (korumasız yayını engeller)
+      # Dashboard girişi: AUTH_PASSWORD verilirse hiç hesap yokken ilk hesap bundan açılır.
+      # Kayıt varsayılan kapalı; yeni kişiler Ayarlar > Kullanıcılar'dan eklenir
       Auth__Username: ${AUTH_USERNAME:-admin}
       Auth__Password: ${AUTH_PASSWORD:-}
-      Auth__Required: "true"
+      Auth__AllowRegistration: ${AUTH_ALLOW_REGISTRATION:-false}
       # AI asistanı (Claude API anahtarı). Boşsa asistan kapalı görünür
       Ai__ApiKey: ${ANTHROPIC_API_KEY:-}
     depends_on:
