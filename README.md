@@ -43,6 +43,12 @@ tracelens-service/
 
 ## Çalıştırma
 
+**Tek tıkla (Windows):** `TraceLens-Baslat.cmd` dosyasına çift tıklayın. Sırayla Docker'ı açar ve bekler, ClickHouse + Collector'ı kaldırır, API'yi derleyip başlatır, dashboard'u ve örnek servisleri açar, sonunda http://localhost:5180'i tarayıcıda açar. Zaten çalışan parçaları atlar. Her parça simge durumundaki "TraceLens - …" penceresinde çalışır (loglar orada). Kapatmak için `TraceLens-Durdur.cmd` (veriler silinmez). Betikler `scripts/` klasöründe; `tracelens-frontend` bu reponun yanında olmalı.
+
+> Docker Desktop açılışta "dockerInference … cannot be accessed" hatasıyla çöküyorsa: Docker'ı kapatın, `%LOCALAPPDATA%\Docker\run` klasörünün adını değiştirin, Docker Desktop > Settings > AI > "Enable Docker Model Runner"ı kapatın. Başlatıcı bu durumu algılayıp aynı adımları ekrana yazar.
+
+Elle:
+
 1. **Docker Desktop**'ı açın, repo kökünde:
    ```
    docker compose up -d
